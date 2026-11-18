@@ -76,8 +76,9 @@ Defined in `src/vehicle_scraper/models.py` (Pydantic `VehicleRecord`). Units:
 | fuel_tank_capacity_l | L | | ev_charging_speed_kw | kW |
 | cargo_capacity_l | L | | wheel_size_in / screen_size_in | in |
 
-Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV · `transmission_type` Manual/Automatic/CVT/DCT ·
+Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV/CNG (bi-fuel and LPG stay null) · `transmission_type` Manual/Automatic/CVT/DCT ·
 `drivetrain` FWD/RWD/AWD/4WD/2WD · `body_style`/`vehicle_type` SUV/Sedan/Pickup/Hatchback/Coupe/Van/...
+(`vehicle_type` can also be `Motorcycle`, set from a site's own category, e.g. CarroYa's "Motos")
 
 **Normalization rules**
 - Missing or unknown → `null`. A feature is set to `false` only when the site explicitly says
@@ -86,7 +87,13 @@ Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV · `transmission_type` Manual/Autom
 - Units are converted automatically: cc→L, gallons→L, mpg / L/100 km→km/L, cu ft→L, miles→km, kW/CV→hp.
 - Colombian quirks: "Modelo: 2010" is treated as the year, "Cilindraje 2.700" as 2.7 L, and "wagon" as SUV.
 - `4x2`/`2WD` doesn't say front or rear, so `drivetrain` is `2WD`, never guessed as FWD or RWD.
-- An engine size of `0.0 L` on an EV means "no combustion engine", so it stays null with no warning.
+- On an EV, an engine size (`0.0 L`, or a motor description like "Motor sincrónico") means
+  "no combustion engine", so it stays null with no warning.
+- An explicit unit next to the number wins: "1.5 L (1.496 cc)" is 1.5 L, "10 HP (7.5 kW)" is 10 hp.
+- If no spec gives the engine size, an explicit `d.d` token in the title/trim is used ("1.4 LS" → 1.4 L).
+- Motorcycles accept small engines and keep exact cc (125 cc → 0.125 L); body_style stays null.
+- Rim and tire sizes typed under each other's label are swapped back ("Llantas: R16" → 16" rim).
+- Vague body values ("Deportivo" → Coupe) are used only when no other source gives a body style.
 - Anything that couldn't be parsed is listed in `parse_warnings`.
 - Personal data (plates, seller names, phones, emails) is never stored.
 

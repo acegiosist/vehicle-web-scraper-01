@@ -90,16 +90,40 @@ PS_TO_HP = 0.98632
 _ENGINE_LAYOUT_RE = re.compile(r"\b[vlhiw]-?\d{1,2}\b|(?<![\d.,])\d{1,2} ?(v|cilindros|valvulas|cylinders|valves)\b")
 
 
-def to_displacement_l(value: object, hint: str = "") -> Optional[float]:
-    # Drop cylinder/valve tokens first: "V6 3.5" -> 3.5, "16V 2.0" -> 2.0 (not 6 or 16).
-    n = parse_number(_ENGINE_LAYOUT_RE.sub(" ", norm(value)) if isinstance(value, str) else value)
+_LITRES_RE = re.compile(r"(?<![\d.,])(\d{1,2}(?:[.,]\d{1,3})?)\s?(?:l|lts?|litros?|liters?|litres?)\b")
+
+
+def to_displacement_l(value: object, hint: str = "", moto: bool = False) -> Optional[float]:
+    """Litres; ``moto`` accepts small engines (from 50 cc) and keeps exact cc (3 decimals)."""
+    m = _LITRES_RE.search(norm(value)) if isinstance(value, str) else None
+    if m:                                                 # explicit litres win: "1.5 L (1.496 cc)"
+        n = parse_number(m.group(1))
+    else:
+        # Drop cylinder/valve tokens first: "V6 3.5" -> 3.5, "16V 2.0" -> 2.0 (not 6 or 16).
+        n = parse_number(_ENGINE_LAYOUT_RE.sub(" ", norm(value)) if isinstance(value, str) else value)
+        h = norm(f"{hint} {value}")
+        # Word-bounded: a bare "cc" would also match inside "inyeccion" (injection).
+        if n is not None and (n >= 50 or re.search(r"\bc\.?c\b|cm3", h)):       # cubic centimetres
+            n = n / 1000
     if n is None or n <= 0:
         return None
-    h = norm(f"{hint} {value}")
-    # Word-bounded: a bare "cc" would also match inside "inyeccion" (injection).
-    if n >= 50 or re.search(r"\bc\.?c\b|cm3", h):       # cubic centimetres
-        n = n / 1000
+    if moto:
+        return round(n, 3) if 0.05 <= n <= 10 else None
     return round(n, 1) if 0.5 <= n <= 10 else None
+
+
+# Explicit "d.d" engine size in a title/trim: "1.4 LS Mecanico", "Oroch 1.3T", "2,0L". Not "77.4 kWh",
+# "5.000 km" or "Serie 3 320i".
+_TITLE_DISPLACEMENT_RE = re.compile(r"(?<![\w.,])(\d[.,]\d)(?:\s?(?:l|t))?(?![\w.,])")
+
+
+def displacement_from_title(value: object) -> Optional[str]:
+    m = _TITLE_DISPLACEMENT_RE.search(norm(value))
+    return m.group(1) if m else None
+
+
+_NUMBER_WORDS = {"dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "seis": 6, "siete": 7, "ocho": 8,
+                 "nueve": 9, "diez": 10, "once": 11, "doce": 12}
 
 
 def to_cylinders(value: object) -> Optional[int]:
@@ -108,20 +132,29 @@ def to_cylinders(value: object) -> Optional[int]:
     if m:
         return int(m.group(2))
     n = parse_int(v)                                          # "6 en V", "4"
+    if n is None:                                             # "cuatro en linea"
+        m = re.search(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b", v)
+        n = _NUMBER_WORDS[m.group(1)] if m else None
     return n if n and 1 <= n <= 16 else None
 
 
-def to_hp(value: object, hint: str = "") -> Optional[int]:
+def to_hp(value: object, hint: str = "", moto: bool = False) -> Optional[int]:
+    """``moto`` accepts small engines (from 3 hp)."""
     n = parse_number(value)                                   # "175/6000" -> 175
     if n is None:
         return None
     h = norm(f"{hint} {value}")
-    if re.search(r"\bkw\b", h):
+    # The unit right after the number wins over other units in the text: "10Hp (7.5Kw)" is 10 hp.
+    m = re.match(r"\D*?\d[\d.,]*\s*([a-z]*)", norm(value))
+    unit = m.group(1) if m else ""
+    if unit in ("hp", "bhp"):
+        pass
+    elif unit == "kw" or (unit not in ("cv", "ps") and re.search(r"\bkw\b", h)):
         n *= KW_TO_HP
-    elif re.search(r"\b(cv|ps)\b", h):
+    elif unit in ("cv", "ps") or re.search(r"\b(cv|ps)\b", h):
         n *= PS_TO_HP
     n = int(round(n))
-    return n if 30 <= n <= 2000 else None
+    return n if (3 if moto else 30) <= n <= 2000 else None
 
 
 def to_liters(value: object, hint: str = "") -> Optional[float]:
@@ -181,6 +214,25 @@ def to_tire_size(value: object, rim: Optional[float] = None) -> Optional[str]:
     return f"{width}/{profile}R{r}" if r else f"{width}/{profile}"
 
 
+_INCH = r"(?:\"|”|''|¿|pulg(?:adas)?\b|inch(?:es)?\b|in\b)"
+_RIM_PATTERNS = [
+    re.compile(r"^r\s?(\d{2})$"),                             # "R16"
+    re.compile(r"\b(\d{2})\s*" + _INCH),                      # '16" x 6,5J', "aluminio de 16¿" (mangled ")
+    re.compile(r"\b(\d{2})\s*x\s*\d+(?:[.,]\d+)?\s*j\b"),     # "13 x 4.5J" (diameter x width J)
+]
+
+
+def rim_from_tire_text(value: object) -> Optional[int]:
+    """A rim size written where a tire size was expected ("R16", '16" x 6,5J'). A bare number
+    ("14") is not read: under a tire label it may as well be a width or profile."""
+    v = norm(value)
+    for rx in _RIM_PATTERNS:
+        m = rx.search(v)
+        if m and 10 <= int(m.group(1)) <= 26:
+            return int(m.group(1))
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Booleans and enums
 # ---------------------------------------------------------------------------
@@ -223,7 +275,7 @@ _TRANSMISSION = [
 ]
 _DRIVETRAIN = [
     (r"\bawd\b|integral|all[- ]wheel|4matic|quattro|xdrive|4motion|sh-awd", "AWD"),
-    (r"4x4|4wd|doble traccion|four[- ]wheel", "4WD"),
+    (r"4x4|4wd|doble traccion|four[- ]wheel|^doble$", "4WD"),   # "Traccion: Doble"
     (r"\bfwd\b|delanter|front", "FWD"),
     (r"\brwd\b|traser|rear|propulsion", "RWD"),
     (r"4x2|\b2wd\b|2x4", "2WD"),        # last: "4x2 delantera" stays FWD
@@ -233,16 +285,24 @@ _BODY = [
     (r"minivan|monovolumen", "Minivan"),
     (r"station ?wagon|familiar|rural\b|estate|break\b", "Wagon"),
     (r"\bsuv\b|crossover|todoterreno|todo terreno|campero|\bwagon\b|camioneta", "SUV"),
-    (r"\bvan\b|furgon|panel", "Van"),
+    (r"\bvans?\b|furgon|panel", "Van"),
     (r"hatch|hb\b|5 ?p(uertas)?\b", "Hatchback"),
     (r"sedan|berlina|4 ?p(uertas)?\b", "Sedan"),
     (r"coupe|cupe", "Coupe"),
     (r"convertible|cabrio|roadster|descapotable", "Convertible"),
     (r"camion|truck", "Truck"),
+    # Last, so "camion de carga" stays Truck: carroya's bare "Carga"/"Pasajeros".
+    (r"\bcarga\b|\bpasajeros\b", "Van"),
+]
+# Vague body values, used only when no other source gives a body style: a "Deportivo"
+# (sports car) may well be a roadster that the seller's comments call "convertible".
+_BODY_FALLBACK = [
+    (r"\bdeportivo\b", "Coupe"),
 ]
 
 
 _NATURAL_GAS_RE = re.compile(r"gas natural|gas licuado|\b(gnv|gnc|glp|cng|lpg)\b|propano")
+_CNG_RE = re.compile(r"gas natural|\b(gnv|gnc|cng)\b")
 _COMBUSTION_RE = re.compile(r"gasolin|diesel|nafta|bencina|petrol|gasoline")
 
 
@@ -284,8 +344,12 @@ def doors_from_title(value: object) -> Optional[int]:
 
 def to_fuel(value: object) -> Optional[str]:
     v = norm(value)
-    # CNG/LPG (or gasoline + gas bi-fuel) has no schema value -> None, never "Gasoline".
-    if _NATURAL_GAS_RE.search(v) or (re.search(r"gasolin", v) and re.search(r"\bgas\b", v)):
+    # Bi-fuel (gasoline + gas) and LPG have no schema value -> None, never "Gasoline".
+    if (_COMBUSTION_RE.search(v) and _NATURAL_GAS_RE.search(v)) or (re.search(r"gasolin", v) and re.search(r"\bgas\b", v)):
+        return None
+    if _CNG_RE.search(v):
+        return "CNG"
+    if _NATURAL_GAS_RE.search(v):
         return None
     # "Gasolina y eléctrico" is a hybrid powertrain, not an EV.
     if re.search(r"electric", v) and _COMBUSTION_RE.search(v):
@@ -304,6 +368,10 @@ def to_drivetrain(value: object) -> Optional[str]:
 
 def to_body(value: object) -> Optional[str]:
     return _first_match(value, _BODY)
+
+
+def body_fallback(value: object) -> Optional[str]:
+    return _first_match(value, _BODY_FALLBACK)
 
 
 _COUNTRIES = {

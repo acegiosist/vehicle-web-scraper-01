@@ -17,12 +17,56 @@ def test_displacement():
     assert N.to_displacement_l("1.5l") == 1.5
     assert N.to_displacement_l("2.700") == 2.7          # Colombian "cilindraje 2.700"
     assert N.to_displacement_l("1998 cc") == 2.0
+    assert N.to_displacement_l("1.5 L (1.496 cc)") == 1.5   # explicit litres win over "cc"
+    assert N.to_displacement_l("SKYACTIV-G 2,0L / 16 Válvulas") == 2.0
+    assert N.to_displacement_l("4 cilindros en línea, 16 válvulas") is None
+
+
+def test_displacement_motorcycle():
+    assert N.to_displacement_l("125") is None                # 0.125 L: not a car engine
+    assert N.to_displacement_l("125", moto=True) == 0.125    # exact cc kept
+    assert N.to_displacement_l("155 cc", moto=True) == 0.155
+    assert N.to_displacement_l("1.802 cc", moto=True) == 1.802
+    assert N.to_displacement_l("30 cc", moto=True) is None
+
+
+def test_displacement_from_title():
+    assert N.displacement_from_title("Sail 1.4 LS Mecanico") == "1.4"
+    assert N.displacement_from_title("Duster Oroch 1.3T Intens") == "1.3"
+    assert N.displacement_from_title("Ecosport 2,0L 16v") == "2,0"
+    assert N.displacement_from_title("Clase C 63 AMG") is None
+    assert N.displacement_from_title("Ioniq 5 77.4 kWh") is None
+    assert N.displacement_from_title("5.000 km") is None
+
+
+def test_cylinders_words():
+    assert N.to_cylinders("cuatro en línea") == 4
+    assert N.to_cylinders("seis en V") == 6
+    assert N.to_cylinders("4 en línea") == 4
 
 
 def test_power_units():
     assert N.to_hp("175/6000") == 175
     assert N.to_hp("150 kW") == 201
     assert N.to_hp("200", "Potencia (CV)") == 197
+    assert N.to_hp("200 hp / 149 kW") == 200                 # the number's own unit wins
+    assert N.to_hp("149 kW (200 hp)") == 200
+
+
+def test_power_motorcycle():
+    assert N.to_hp("10Hp (7.5Kw) @ 8000 rpm", moto=True) == 10   # not 10 x 1.34
+    assert N.to_hp("13,8 HP @ 9000 RPM", moto=True) == 14
+    assert N.to_hp("13,8 HP @ 9000 RPM") is None                  # cars: below 30 hp
+    assert N.to_hp("1 HP", moto=True) is None
+
+
+def test_rim_from_tire_text():
+    assert N.rim_from_tire_text("R16") == 16
+    assert N.rim_from_tire_text('16" x 6,5J Aluminio') == 16
+    assert N.rim_from_tire_text("13 x 4.5J") == 13
+    assert N.rim_from_tire_text("Llantas en aluminio de 16¿") == 16
+    assert N.rim_from_tire_text("14") is None                 # bare: could be a width or profile
+    assert N.rim_from_tire_text("7.50 x 16 12PR") is None     # truck tire size, not a rim
 
 
 def test_volume_and_economy():
@@ -42,6 +86,13 @@ def test_enums():
     assert N.to_drivetrain("4x2") == "2WD"             # front/rear not stated -> never guessed
     assert N.to_drivetrain("2WD") == "2WD"
     assert N.to_drivetrain("4x2 delantera") == "FWD"
+    assert N.to_drivetrain("Doble") == "4WD"               # "Tracción: Doble"
+    assert N.to_drivetrain("Doble cabina") is None
+    assert N.to_body("Vans") == "Van"
+    assert N.to_body("Carga") == "Van" and N.to_body("Pasajeros") == "Van"
+    assert N.to_body("Camión de carga") == "Truck"
+    assert N.to_body("Deportivo") is None                  # fallback only, see test_mapping
+    assert N.body_fallback("Deportivo") == "Coupe"
     assert N.to_fuel("Gasolina") == "Gasoline"
     assert N.to_fuel("Híbrido") == "Hybrid"
     assert N.to_fuel("Eléctrico") == "EV"
@@ -74,9 +125,13 @@ def test_displacement_ignores_cylinder_and_valve_tokens():
 
 
 def test_fuel_gas_and_mixed():
-    assert N.to_fuel("Gas natural vehicular") is None   # CNG: no schema value, never Gasoline
-    assert N.to_fuel("GNV") is None
+    assert N.to_fuel("Gas natural vehicular") == "CNG"  # never Gasoline
+    assert N.to_fuel("GNV") == "CNG"
+    assert N.to_fuel("CNG") == "CNG"
+    assert N.to_fuel("GLP") is None                     # LPG: no schema value
     assert N.to_fuel("Gasolina y gas") is None          # bi-fuel
+    assert N.to_fuel("Gasolina y GNV") is None          # bi-fuel
+    assert N.to_fuel("Petrol + CNG") is None            # bi-fuel
     assert N.to_fuel("Gas") == "Gasoline"               # US English "gas"
     assert N.to_fuel("Gasolina y eléctrico") == "Hybrid"
     assert N.to_fuel("Diesel - Eléctrico") == "Hybrid"

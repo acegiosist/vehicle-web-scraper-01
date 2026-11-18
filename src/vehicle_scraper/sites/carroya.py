@@ -80,12 +80,21 @@ class CarroYaScraper(SiteScraper):
         b.set("model", d.get("model"))
         b.set("trim", d.get("version"))
         b.set("model_year", d.get("year"))
-        # "cylindrical" mixes two formats across listings: tenths of a litre
+        moto = d.get("category") == "Motos"
+        if moto:
+            b.set("vehicle_type", "Motorcycle")    # first: switches displacement/hp to moto ranges
+        # "cylindrical" mixes two formats across car listings: tenths of a litre
         # (16 -> 1.6L) or actual cc (2000 -> 2.0L). Pick whichever lands the
         # result in a plausible displacement range; neither guesses blindly.
+        # Motorcycles always give cc (125, 292, 411).
         cyl = d.get("cylindrical")
         if isinstance(cyl, (int, float)) and cyl > 0:
-            if 5 <= cyl <= 100:
+            if moto:
+                if 50 <= cyl <= 2500:
+                    b.set("engine_displacement_l", cyl / 1000)
+                else:
+                    b.warn(f"could not parse engine_displacement_l from '{cyl}'")
+            elif 5 <= cyl <= 100:
                 b.set("engine_displacement_l", round(cyl / 10, 1))
             elif 500 <= cyl <= 10000:
                 b.set("engine_displacement_l", round(cyl / 1000, 1))

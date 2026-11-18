@@ -18,6 +18,8 @@ EXPECTED = {
     'model': 'Verna',
     'model_year': 2018,
     'body_style': 'Sedan',
+    'engine_displacement_l': 1.6,          # from the title "2018 Hyundai Verna 1.6 VTVT SX"
+    'fuel_type': 'CNG',
     'transmission_type': 'Manual',
     'abs': True,
     'alloy_wheels': True,
@@ -30,3 +32,4 @@ def test_cars24_detail(cfg):
     rec = Cars24Scraper(cfg, client=client).parse(Listing('25238979175', URL))
     got = {k: v for k, v in rec.model_dump(exclude={"scraped_at", "parse_warnings"}).items() if v is not None}
     assert got == EXPECTED
+    assert rec.parse_warnings == []

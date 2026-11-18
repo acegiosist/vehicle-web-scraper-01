@@ -42,7 +42,7 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
      r"|cargo|baul|maletero|cajuela|trunk|volume|volumen|in place"),
     ("doors", r"puertas|doors?$", None),
     ("cargo_capacity_l", r"baul|maletero|cajuela|cargo|trunk|boot|portaequipaje|volumen de carga", r"carga util|payload|kg"),
-    ("tire_size", r"llanta|neumatic|tire|tyre|cubierta", r"material|aleacion"),
+    ("tire_size", r"llanta|neumatic|tire|tyre|cubierta", r"material|aleacion|life|vida"),   # not "tyre life left"
     ("wheel_size_in", r"\brin\b|rines|^aro|wheel size|dimensiones rin|tamano de rin|\brims?\b", r"material|aleacion|aluminio"),
     ("fuel_economy_kml", r"consumo|rendimiento|fuel economy|average consumption|km ?/ ?l|eficiencia", None),
     ("ev_range_km", r"autonomia|^range$|alcance electrico|ev range", None),
@@ -163,7 +163,8 @@ CONVERTERS: dict[str, Conv] = {
     "trim": lambda v, h: N.clean(v),
     "model_year": _model_year,
     "body_style": lambda v, h: N.to_body(v),
-    "vehicle_type": lambda v, h: N.to_body(v),
+    # "Motorcycle" only when a scraper passes it explicitly (e.g. carroya's category "Motos").
+    "vehicle_type": lambda v, h: "Motorcycle" if N.norm(v) == "motorcycle" else N.to_body(v),
     "country_of_manufacture": lambda v, h: N.to_country(v),
     "engine_displacement_l": N.to_displacement_l,
     "engine_cylinders": lambda v, h: N.to_cylinders(v),
@@ -189,6 +190,12 @@ CONVERTERS: dict[str, Conv] = {
 for _f in BOOLEAN_FIELDS:
     CONVERTERS[_f] = lambda v, h: N.to_bool(v)
 
+# Used instead of CONVERTERS once vehicle_type is "Motorcycle": small engines are plausible.
+MOTO_CONVERTERS: dict[str, Conv] = {
+    "engine_displacement_l": lambda v, h: N.to_displacement_l(v, h, moto=True),
+    "horsepower_hp": lambda v, h: N.to_hp(v, h, moto=True),
+}
+
 _NUMERIC_FIELDS = {
     "engine_displacement_l", "engine_cylinders", "horsepower_hp", "fuel_tank_capacity_l", "seats", "doors",
     "cargo_capacity_l", "wheel_size_in", "tire_size", "fuel_economy_kml", "ev_range_km", "ev_charging_speed_kw",
@@ -208,17 +215,21 @@ class RecordBuilder:
         self.values: dict[str, Any] = {}
         self.warnings: list[str] = []
         self.unmapped: dict[str, str] = {}
-        self.zero_displacement: Optional[str] = None
+        self.displacement_misses: list[str] = []   # unparsed displacements; build() warns unless EV
+        self.body_fallback: Optional[str] = None   # vague body ("Deportivo"), used only if nothing else
 
     # -- primitives ---------------------------------------------------------
     def set(self, field: str, raw: Any, hint: str = "") -> bool:
         if raw is None or raw == "" or field in self.values:
             return False
-        conv = CONVERTERS.get(field)
+        moto = self.values.get("vehicle_type") == "Motorcycle"
+        conv = (moto and MOTO_CONVERTERS.get(field)) or CONVERTERS.get(field)
         value = conv(raw, hint) if conv else raw
         if value is None:
-            if field == "engine_displacement_l" and N.parse_number(raw) == 0:
-                self.zero_displacement = N.clean(raw)   # EV placeholder "0.0l"; build() decides
+            if field == "engine_displacement_l":
+                self.displacement_misses.append(N.clean(raw) or "")
+            elif field in ("body_style", "vehicle_type") and N.body_fallback(raw):
+                self.body_fallback = self.body_fallback or N.body_fallback(raw)   # applied in build()
             elif field not in BOOLEAN_FIELDS:
                 self.warn(f"could not parse {field} from '{N.clean(raw)}'")
             return False
@@ -244,6 +255,12 @@ class RecordBuilder:
             field = None                      # "Con airbags": "Sí" is a feature flag, not a count
         if field == "airbags_count" and not re.search(r"\d", str(value)):
             field = None                      # "Side Airbags": "Front and Rear" is a location, not a count
+        # Rim and tire sizes entered under each other's label: "Llantas: R16", "Rin: 245-60".
+        if field == "tire_size" and N.to_tire_size(value) is None and N.rim_from_tire_text(value):
+            field, value = "wheel_size_in", N.rim_from_tire_text(value)
+        elif field == "wheel_size_in" and N.to_inches(value) is None \
+                and N.to_tire_size(str(value).replace("-", "/")):
+            field, value = "tire_size", N.to_tire_size(str(value).replace("-", "/"))
         if field:
             if field == "body_style":
                 self.set("vehicle_type", value)
@@ -294,6 +311,11 @@ class RecordBuilder:
         drive = N.drivetrain_from_title(text)
         if drive:
             self.set("drivetrain", drive)
+        disp = N.displacement_from_title(text)          # "1.4 LS Mecanico": fallback only
+        if disp:
+            n = len(self.displacement_misses)
+            self.set("engine_displacement_l", disp)
+            del self.displacement_misses[n:]             # an implausible title token isn't a warning
         doors = N.doors_from_title(text)
         if doors:
             self.set("doors", doors)
@@ -320,14 +342,19 @@ class RecordBuilder:
         tire, rim = data.get("tire_size"), data.get("wheel_size_in")
         if tire and "R" not in tire and rim:
             data["tire_size"] = f"{tire}R{rim}"
+        if self.body_fallback and "body_style" not in data and data.get("vehicle_type") != "Motorcycle":
+            data["body_style"] = self.body_fallback
         if "vehicle_type" not in data and "body_style" in data:
             data["vehicle_type"] = data["body_style"]
         if data.get("fuel_type") != "EV":
             for f in ("ev_range_km", "ev_charging_speed_kw"):
                 if f in data and data.get("fuel_type") not in (None, "Hybrid"):
                     data.pop(f)
-        # "Motor: 0.0l" on an EV means "no combustion engine": null, nothing to warn about.
-        if (self.zero_displacement is not None and "engine_displacement_l" not in data
-                and data.get("fuel_type") != "EV"):
-            self.warn(f"could not parse engine_displacement_l from '{self.zero_displacement}'")
+        # An EV has no combustion engine: "0.0l" or a motor description ("Motor sincrónico de
+        # imán permanente") under a displacement label is expected, not worth a warning.
+        if data.get("fuel_type") != "EV":
+            for raw in self.displacement_misses:
+                if N.parse_number(raw) == 0 and "engine_displacement_l" in data:
+                    continue                             # a "0.0l" placeholder, but the size is known
+                self.warn(f"could not parse engine_displacement_l from '{raw}'")
         return VehicleRecord(**self.meta, **data, parse_warnings=self.warnings)

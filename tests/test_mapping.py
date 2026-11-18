@@ -124,6 +124,60 @@ def test_out_of_range_year_is_null_not_rejected():
     assert any("model_year" in w for w in rec.parse_warnings)
 
 
+def test_tyre_life_is_not_a_tire_size():
+    assert match_label("Llantas") == "tire_size"
+    assert match_label("Tyre size") == "tire_size"
+    assert match_label("100% tyre life left") is None        # cars24 highlight, not a spec
+    assert match_label("Vida útil de llantas") is None
+
+
+def test_ev_motor_text_under_displacement_is_silent():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Motor", "Motor sincrónico de imán permanente"), ("Combustible", "Eléctrico")])
+    assert b.build().parse_warnings == []
+
+
+def test_motorcycle_ranges():
+    b = RecordBuilder("t", "u", "1")
+    b.set("vehicle_type", "Motorcycle")
+    b.add_pairs([("Cilindrada", "155 cc"), ("Potencia (H.P)", "15.15 HP a 8000 rpm"), ("Carrocería", "Deportivo")])
+    r = b.build()
+    assert (r.vehicle_type, r.engine_displacement_l, r.horsepower_hp) == ("Motorcycle", 0.155, 15)
+    assert r.body_style is None                         # no body style for motorcycles
+    assert r.parse_warnings == []
+    assert RecordBuilder("t", "u", "1").set("vehicle_type", "Moto") is False   # only the explicit value
+
+
+def test_rim_and_tire_swapped():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Llantas (dimensiones)", "R18"), ("Dimensiones Rin", "245-60")])
+    r = b.build()
+    assert (r.wheel_size_in, r.tire_size) == (18, "245/60R18")
+    assert r.parse_warnings == []
+
+
+def test_deportivo_is_a_body_fallback():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Carrocería", "Deportivo")
+    b.add_free_text("Carrocería convertible tipo Roadster")
+    r = b.build()
+    assert (r.body_style, r.vehicle_type) == ("Convertible", "Convertible")
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Carrocería", "Deportivo")
+    r = b.build()
+    assert (r.body_style, r.vehicle_type, r.parse_warnings) == ("Coupe", "Coupe", [])
+
+
+def test_title_displacement_fallback():
+    assert _titled("Sail", "1.4 LS Mecanico").engine_displacement_l == 1.4
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Cilindrada (c.c³)", "1598")
+    b.add_title("Ibiza", "Style 2.0 Hatchback")            # structured spec wins
+    assert b.build().engine_displacement_l == 1.6
+    r = _titled("X", "Gen 0.2 Edition")                     # implausible token: ignored, silent
+    assert r.engine_displacement_l is None and r.parse_warnings == []
+
+
 def test_zero_displacement_on_ev_is_silent():
     b = RecordBuilder("t", "u", "1")
     b.add_pairs([("Motor", "0.0l"), ("Combustible", "eléctrico")])

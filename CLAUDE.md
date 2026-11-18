@@ -90,7 +90,10 @@ pages, only used when `USE_BROWSER=true` or `--browser`.
   a feature that's simply not listed stays `null` (free text can only ever set a feature to `true`).
 - Units are auto-converted: cc→L, gallons→L, mpg/L per 100km→km/L, cu ft→L, miles→km, kW/CV→hp.
 - `4x2`/`2WD` is ambiguous (front- or rear-wheel), so `drivetrain` is `2WD` (its own enum value)
-  instead of guessing FWD/RWD. `0.0l` displacement on an EV stays `null` without a warning.
+  instead of guessing FWD/RWD. Unparseable displacement on an EV stays `null` without a warning.
+- `vehicle_type = "Motorcycle"` is only ever set explicitly by a scraper (carroya's category "Motos"),
+  and it must be set first: `RecordBuilder.set` then uses `MOTO_CONVERTERS` (from 50 cc / 3 hp,
+  3-decimal litres). `add_title` also reads a `d.d` displacement token as a last-resort fallback.
 - Colombian-market quirks are handled explicitly: `"Modelo: 2010"` is the model year (not literally
   the model), `"Cilindraje 2.700"` means 2.7 L.
 - Personal data (plates, seller names, phones, emails) is never captured into the schema.
