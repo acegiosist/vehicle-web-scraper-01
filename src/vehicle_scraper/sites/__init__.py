@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from . import carroya, cars24, chileautos, cofino, tucarro  # noqa: F401  (registers sites)
+from . import carroya, cars24, chileautos, cofino, truecar, tucarro  # noqa: F401  (registers sites)
 from .base import REGISTRY, Listing, SiteScraper, register
 from .html_site import GenericScraper, HtmlSiteScraper
 
