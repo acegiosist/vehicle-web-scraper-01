@@ -39,7 +39,9 @@ def test_enums():
     assert N.to_transmission("CVT") == "CVT"
     assert N.to_drivetrain("4x4") == "4WD"
     assert N.to_drivetrain("Tracción integral") == "AWD"
-    assert N.to_drivetrain("4x2") is None              # ambiguous -> never guessed
+    assert N.to_drivetrain("4x2") == "2WD"             # front/rear not stated -> never guessed
+    assert N.to_drivetrain("2WD") == "2WD"
+    assert N.to_drivetrain("4x2 delantera") == "FWD"
     assert N.to_fuel("Gasolina") == "Gasoline"
     assert N.to_fuel("Híbrido") == "Hybrid"
     assert N.to_fuel("Eléctrico") == "EV"

@@ -208,6 +208,7 @@ class RecordBuilder:
         self.values: dict[str, Any] = {}
         self.warnings: list[str] = []
         self.unmapped: dict[str, str] = {}
+        self.zero_displacement: Optional[str] = None
 
     # -- primitives ---------------------------------------------------------
     def set(self, field: str, raw: Any, hint: str = "") -> bool:
@@ -216,8 +217,8 @@ class RecordBuilder:
         conv = CONVERTERS.get(field)
         value = conv(raw, hint) if conv else raw
         if value is None:
-            if field == "drivetrain" and re.search(r"4x2|2wd|2x4", N.norm(raw)):
-                self.warn(f"drivetrain '{raw}' is 2WD but front/rear not stated")
+            if field == "engine_displacement_l" and N.parse_number(raw) == 0:
+                self.zero_displacement = N.clean(raw)   # EV placeholder "0.0l"; build() decides
             elif field not in BOOLEAN_FIELDS:
                 self.warn(f"could not parse {field} from '{N.clean(raw)}'")
             return False
@@ -293,8 +294,6 @@ class RecordBuilder:
         drive = N.drivetrain_from_title(text)
         if drive:
             self.set("drivetrain", drive)
-        elif "drivetrain" not in self.values and re.search(r"\b(4x2|2wd|2x4)\b", N.norm(text)):
-            self.warn("drivetrain '4x2' is 2WD but front/rear not stated")
         doors = N.doors_from_title(text)
         if doors:
             self.set("doors", doors)
@@ -327,4 +326,8 @@ class RecordBuilder:
             for f in ("ev_range_km", "ev_charging_speed_kw"):
                 if f in data and data.get("fuel_type") not in (None, "Hybrid"):
                     data.pop(f)
+        # "Motor: 0.0l" on an EV means "no combustion engine": null, nothing to warn about.
+        if (self.zero_displacement is not None and "engine_displacement_l" not in data
+                and data.get("fuel_type") != "EV"):
+            self.warn(f"could not parse engine_displacement_l from '{self.zero_displacement}'")
         return VehicleRecord(**self.meta, **data, parse_warnings=self.warnings)

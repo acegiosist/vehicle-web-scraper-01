@@ -77,7 +77,7 @@ Defined in `src/vehicle_scraper/models.py` (Pydantic `VehicleRecord`). Units:
 | cargo_capacity_l | L | | wheel_size_in / screen_size_in | in |
 
 Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV · `transmission_type` Manual/Automatic/CVT/DCT ·
-`drivetrain` FWD/RWD/AWD/4WD · `body_style`/`vehicle_type` SUV/Sedan/Pickup/Hatchback/Coupe/Van/...
+`drivetrain` FWD/RWD/AWD/4WD/2WD · `body_style`/`vehicle_type` SUV/Sedan/Pickup/Hatchback/Coupe/Van/...
 
 **Normalization rules**
 - Missing or unknown → `null`. A feature is set to `false` only when the site explicitly says
@@ -85,7 +85,8 @@ Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV · `transmission_type` Manual/Autom
 - Free text (seller comments) can only set features to `true`. It skips negated mentions like "sin sunroof".
 - Units are converted automatically: cc→L, gallons→L, mpg / L/100 km→km/L, cu ft→L, miles→km, kW/CV→hp.
 - Colombian quirks: "Modelo: 2010" is treated as the year, "Cilindraje 2.700" as 2.7 L, and "wagon" as SUV.
-- `4x2` is ambiguous (front or rear), so `drivetrain` stays null and a warning is recorded.
+- `4x2`/`2WD` doesn't say front or rear, so `drivetrain` is `2WD`, never guessed as FWD or RWD.
+- An engine size of `0.0 L` on an EV means "no combustion engine", so it stays null with no warning.
 - Anything that couldn't be parsed is listed in `parse_warnings`.
 - Personal data (plates, seller names, phones, emails) is never stored.
 

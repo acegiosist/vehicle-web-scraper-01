@@ -19,9 +19,9 @@ def test_cofino_detail(cfg):
     assert rec.fuel_type == "Gasoline"
     assert rec.engine_displacement_l == 1.5
     assert rec.mileage_km == 27770
-    assert rec.drivetrain is None                       # 4x2 is ambiguous
-    assert any("4x2" in w for w in rec.parse_warnings)
+    assert rec.drivetrain == "2WD"                      # 4x2: front/rear not stated
     assert rec.price == 169420 and rec.currency == "GTQ"  # site's JSON-LD wrongly says MXN
+    assert rec.parse_warnings == []                     # MXN quirk is known, not warned
 
 
 def test_carroya_detail(cfg):

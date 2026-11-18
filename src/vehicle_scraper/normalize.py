@@ -226,6 +226,7 @@ _DRIVETRAIN = [
     (r"4x4|4wd|doble traccion|four[- ]wheel", "4WD"),
     (r"\bfwd\b|delanter|front", "FWD"),
     (r"\brwd\b|traser|rear|propulsion", "RWD"),
+    (r"4x2|\b2wd\b|2x4", "2WD"),        # last: "4x2 delantera" stays FWD
 ]
 _BODY = [
     (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble)|camioneta de platon|platon", "Pickup"),
@@ -264,6 +265,7 @@ _DRIVETRAIN_EXPLICIT = [
     (r"\b4x4\b|\b4wd\b", "4WD"),
     (r"\bfwd\b", "FWD"),
     (r"\brwd\b", "RWD"),
+    (r"\b(4x2|2wd|2x4)\b", "2WD"),
 ]
 
 
@@ -296,7 +298,7 @@ def to_transmission(value: object) -> Optional[str]:
 
 
 def to_drivetrain(value: object) -> Optional[str]:
-    """4x2 / 2WD are ambiguous (front or rear) -> None (caller logs a warning)."""
+    """4x2 / 2WD without front/rear stated -> "2WD" (never guessed as FWD or RWD)."""
     return _first_match(value, _DRIVETRAIN)
 
 

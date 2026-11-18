@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 VehicleType = Literal["SUV", "Sedan", "Pickup", "Hatchback", "Coupe", "Van", "Convertible", "Wagon", "Truck", "Minivan"]
 FuelType = Literal["Gasoline", "Diesel", "Hybrid", "EV"]
 TransmissionType = Literal["Manual", "Automatic", "CVT", "DCT"]
-Drivetrain = Literal["FWD", "RWD", "AWD", "4WD"]
+Drivetrain = Literal["FWD", "RWD", "AWD", "4WD", "2WD"]   # 2WD: "4x2", front/rear not stated
 
 # Ordered list of the schema fields (used by CSV export and the coverage report).
 IDENTITY_FIELDS = [

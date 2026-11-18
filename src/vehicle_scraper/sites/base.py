@@ -42,6 +42,7 @@ class SiteScraper(ABC):
     base_url: str = ""
     country: str = ""
     currency: Optional[str] = None        # overrides a wrong/missing currency on the site
+    warn_currency_mismatch: bool = True   # False when the site's reported currency is known-wrong
     status: str = "verified"              # verified | needs-token | blocked-by-site | unverified
     notes: str = ""
     extra_headers: dict = {}
@@ -85,7 +86,7 @@ class SiteScraper(ABC):
 
     def finish(self, record: VehicleRecord) -> VehicleRecord:
         if self.currency and (record.currency is None or record.currency != self.currency):
-            if record.currency and record.currency != self.currency:
+            if record.currency and record.currency != self.currency and self.warn_currency_mismatch:
                 record.parse_warnings.append(f"site reported currency {record.currency}; using {self.currency}")
             record.currency = self.currency
         return record

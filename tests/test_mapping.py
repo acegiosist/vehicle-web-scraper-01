@@ -124,6 +124,20 @@ def test_out_of_range_year_is_null_not_rejected():
     assert any("model_year" in w for w in rec.parse_warnings)
 
 
+def test_zero_displacement_on_ev_is_silent():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Motor", "0.0l"), ("Combustible", "eléctrico")])
+    r = b.build()
+    assert r.engine_displacement_l is None and r.fuel_type == "EV"
+    assert r.parse_warnings == []
+
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Motor", "0.0l"), ("Combustible", "gasolina")])
+    r = b.build()
+    assert r.engine_displacement_l is None
+    assert r.parse_warnings == ["could not parse engine_displacement_l from '0.0l'"]
+
+
 def _titled(*parts):
     b = RecordBuilder("t", "u", "1")
     b.add_title(*parts)
@@ -143,8 +157,8 @@ def test_title_explicit_body_drivetrain_doors():
 
 def test_title_never_guesses():
     r = _titled("Frontier NP300", "2.5 4x2 Doble Cabina")
-    assert r.drivetrain is None                       # not FWD from "Frontier"
-    assert any("4x2" in w for w in r.parse_warnings)
+    assert r.drivetrain == "2WD"                      # not FWD from "Frontier"
+    assert r.parse_warnings == []
     assert _titled("DS 7", "Crossback Audace 1.6").body_style is None
     assert _titled("206", "1.4 5 Puertas").body_style is None    # doors alone don't imply a body
     assert _titled("HB20s", "Advance").body_style is None

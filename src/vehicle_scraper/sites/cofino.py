@@ -23,6 +23,7 @@ class CofinoScraper(SiteScraper):
     base_url = "https://cofinousados.com"
     country = "GT"
     currency = "GTQ"
+    warn_currency_mismatch = False   # JSON-LD always says "MXN"; known quirk, not worth a warning
     notes = "Dealer site; publishes few specs (no equipment list)."
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:

@@ -113,8 +113,11 @@ def test_scaffold_from_sitemap(cfg, tmp_path):
     # The generated parser reads the page the same way the hand-written CofinoScraper does.
     hand = CofinoScraper(cfg, client=FakeClient({"/catalogo/": "cofino_detail.html"}))
     expected = hand.parse(Listing(sc.record.listing_id, sc.record.source_url))
-    skip = {"scraped_at", "source_site"}
+    skip = {"scraped_at", "source_site", "parse_warnings"}
     assert sc.record.model_dump(exclude=skip) == expected.model_dump(exclude=skip)
+    # Only difference: CofinoScraper silences the known MXN quirk, the generated scraper flags it.
+    assert sc.record.parse_warnings == ["site reported currency MXN; using GTQ"]
+    assert expected.parse_warnings == []
 
     sites_dir, tests_dir = tmp_path / "sites", tmp_path / "tests"
     sites_dir.mkdir()

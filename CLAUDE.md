@@ -89,8 +89,8 @@ pages, only used when `USE_BROWSER=true` or `--browser`.
 - Missing/unknown → `null`. A boolean feature becomes `false` only when a site explicitly says so;
   a feature that's simply not listed stays `null` (free text can only ever set a feature to `true`).
 - Units are auto-converted: cc→L, gallons→L, mpg/L per 100km→km/L, cu ft→L, miles→km, kW/CV→hp.
-- `4x2`/`2WD` is ambiguous (front- or rear-wheel) so `drivetrain` stays `null` with a warning
-  instead of guessing.
+- `4x2`/`2WD` is ambiguous (front- or rear-wheel), so `drivetrain` is `2WD` (its own enum value)
+  instead of guessing FWD/RWD. `0.0l` displacement on an EV stays `null` without a warning.
 - Colombian-market quirks are handled explicitly: `"Modelo: 2010"` is the model year (not literally
   the model), `"Cilindraje 2.700"` means 2.7 L.
 - Personal data (plates, seller names, phones, emails) is never captured into the schema.
