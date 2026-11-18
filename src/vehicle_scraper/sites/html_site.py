@@ -23,6 +23,7 @@ class HtmlSiteScraper(SiteScraper):
     page_url_template: Optional[str] = None     # e.g. "https://x.com/autos?page={page}"
     first_page: int = 1
     max_pages: int = 500
+    page_size: int = 12                          # listings per page, for {offset} templates
     link_pattern: str = ""                       # regex on absolute detail URLs
     id_pattern: str = r"(\d{5,})/?$"             # regex with one group -> listing_id
     # Parsing -----------------------------------------------------------------
@@ -48,7 +49,7 @@ class HtmlSiteScraper(SiteScraper):
         yield from self.start_urls
         if self.page_url_template:
             for p in range(self.first_page, self.first_page + self.max_pages):
-                yield self.page_url_template.format(page=p, offset=(p - self.first_page) * 12)
+                yield self.page_url_template.format(page=p, offset=(p - self.first_page) * self.page_size)
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:
         if self.sitemap_url:

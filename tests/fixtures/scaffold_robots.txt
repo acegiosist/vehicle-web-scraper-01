@@ -1,0 +1,10 @@
+# ai-train: training or fine-tuning AI models.
+# If a Content-Signal = no, you may not collect content for that use.
+User-agent: MistralAI-Training
+Disallow: /
+
+User-agent: *
+Allow: /
+Content-Signal: search=yes, ai-train=no
+
+Sitemap: https://cofinousados.com/sitemap.xml

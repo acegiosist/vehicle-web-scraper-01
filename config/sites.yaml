@@ -13,6 +13,7 @@
 #   name, base_url, country, currency          identity
 #   sitemap_url + sitemap_pattern              discovery option A (preferred)
 #   start_urls / page_url_template             discovery option B ({page} or {offset} placeholders)
+#   first_page, max_pages, page_size           pagination (page_size = listings per {offset} step)
 #   link_pattern                               regex matching detail-page URLs
 #   id_pattern                                 regex with ONE group extracting the listing id
 #   spec_selector                              optional CSS selector of the specs area

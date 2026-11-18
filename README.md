@@ -90,6 +90,31 @@ Enums: `fuel_type` Gasoline/Diesel/Hybrid/EV · `transmission_type` Manual/Autom
 
 ## Adding a site
 
+**Fastest: scaffold it from a URL.**
+
+```bash
+PYTHONPATH=src python -m vehicle_scraper new-site https://www.example-autos.com/usados --dry-run
+PYTHONPATH=src python -m vehicle_scraper new-site https://www.example-autos.com/usados --country CR --currency CRC
+```
+
+The URL can be a listing page, a car's page or the homepage. The command:
+
+1. Probes the site politely (robots.txt, crawl delay, block detection). If it hits a CAPTCHA or a
+   robots.txt rule, it stops and generates nothing.
+2. Finds listings from the sitemap or from the paginated listing pages, and infers the
+   detail-URL and listing-id regexes.
+3. Parses 1–3 sample cars to see where the specs are: JSON-LD, embedded JSON, or the HTML section
+   that holds them.
+4. Writes:
+   - `sites/<name>.py`, a dedicated scraper with its own `parse()` for you to refine;
+   - the import line in `sites/__init__.py`;
+   - `tests/fixtures/<name>_detail.html`, with contact details blanked;
+   - `tests/test_site_<name>.py`, a snapshot test.
+
+It then prints a report showing which fields the samples filled, the labels it couldn't map, and
+any warnings (wrong currency, JS-rendered page → retry with `--browser`). Other options:
+`--name`, `--force`, `--dry-run`. New sites start as `unverified`.
+
 **Option A: YAML, no code.** Add an entry to `config/sites.yaml` with either a sitemap
 (`sitemap_url` + `sitemap_pattern`) or paginated listing pages (`page_url_template` +
 `link_pattern`). The generic pipeline reads JSON-LD, embedded JSON and HTML spec tables.
@@ -118,6 +143,7 @@ src/vehicle_scraper/
   storage.py     SQLite upsert + CSV/JSON export
   report.py      field-coverage report
   cli.py         command line
+  scaffold.py    `new-site`: probe a site from a URL and generate its scraper + test
   sites/         one module per site + generic YAML-driven scraper
 config/sites.yaml  extra sites without code
 tests/           offline tests with fixtures captured from the real sites

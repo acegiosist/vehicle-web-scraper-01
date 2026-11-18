@@ -17,7 +17,7 @@ python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\a
 pip install -r requirements.txt
 cp .env.example .env                                   # edit USER_AGENT with a real contact
 
-# tests (28 offline tests, run against fixtures in tests/fixtures/, no network)
+# tests (offline, run against fixtures in tests/fixtures/, no network)
 python -m pytest
 python -m pytest tests/test_mapping.py                 # single file
 python -m pytest tests/test_mapping.py::test_name -v   # single test
@@ -29,6 +29,7 @@ PYTHONPATH=src python -m vehicle_scraper run --all --limit 50 --refresh
 PYTHONPATH=src python -m vehicle_scraper run --site cars24 --browser   # Playwright-rendered pages
 PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
 PYTHONPATH=src python -m vehicle_scraper coverage
+PYTHONPATH=src python -m vehicle_scraper new-site <url> [--name --country --currency --browser --force --dry-run]
 ```
 
 There is no lint/format command configured in this repo.
@@ -92,6 +93,15 @@ pages, only used when `USE_BROWSER=true` or `--browser`.
 - Colombian-market quirks are handled explicitly: `"Modelo: 2010"` is the model year (not literally
   the model), `"Cilindraje 2.700"` means 2.7 L.
 - Personal data (plates, seller names, phones, emails) is never captured into the schema.
+
+**Scaffolding a site:** `new-site <url>` (`scaffold.py`) probes the site through `PoliteClient`
+and infers discovery: a sitemap first, then listing-page links plus pagination. URLs are grouped
+by path shape in `url_groups`. It locates the spec section on a sample page (`find_spec_section`:
+a stable id, a heading, or a non-utility class) and renders a dedicated `HtmlSiteScraper`
+subclass with an explicit `parse()`. It also writes a cleaned fixture and a snapshot test, and
+edits the `from . import ...` line in `sites/__init__.py`. The generated module is exec'd
+offline against the samples (`load_module_class`, which leaves `REGISTRY` untouched) to build
+the snapshot, so the generated test matches what the generated code really produces.
 
 **Adding a site:** prefer Option A (a `config/sites.yaml` entry, no code) when the site has a
 sitemap or simple paginated listings and exposes JSON-LD/embedded JSON/HTML spec tables — see the

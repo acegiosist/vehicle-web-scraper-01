@@ -5,6 +5,7 @@
     python -m vehicle_scraper run --all --limit 20 --refresh
     python -m vehicle_scraper export --format csv
     python -m vehicle_scraper coverage
+    python -m vehicle_scraper new-site https://www.example-autos.com/usados --dry-run
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from pydantic import ValidationError
 from .config import settings
 from .http import BlockedError, DisallowedError
 from .report import write_coverage
+from .scaffold import cli_new_site
 from .sites import REGISTRY, load_yaml_sites
 from .storage import Storage
 
@@ -95,10 +97,22 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("coverage", help="print the field-coverage report")
 
+    ns = sub.add_parser("new-site", help="scaffold a scraper module for a new site from a URL")
+    ns.add_argument("url", help="a listing/search page, a car's detail page, or the homepage")
+    ns.add_argument("--name", default=None, help="site name (default: from the domain)")
+    ns.add_argument("--country", default=None, help="ISO country code (default: from the domain)")
+    ns.add_argument("--currency", default=None, help="ISO currency code that prices are really in")
+    ns.add_argument("--browser", action="store_true", help="render pages with Playwright")
+    ns.add_argument("--force", action="store_true", help="overwrite an existing site module")
+    ns.add_argument("--dry-run", action="store_true", help="print the generated files, write nothing")
+
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
     load_yaml_sites(args.sites_file)
+
+    if args.cmd == "new-site":
+        return cli_new_site(args)
 
     if args.cmd == "sites":
         for name, cls in sorted(REGISTRY.items()):
