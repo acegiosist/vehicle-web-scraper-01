@@ -1,32 +1,63 @@
-"""CARS24 (India; also cars24.ae / cars24.com.au) — https://www.cars24.com
+r"""www.cars24.com — https://www.cars24.com
 
-Status Nov 2026: UNVERIFIED. Our test request got a Cloudflare 403 page
-("Attention Required!"), which can be geographic (the site targets India).
-The scraper detects that wall and skips the site instead of bypassing it.
-
-When reachable it uses the generic pipeline: JSON-LD, Next.js __NEXT_DATA__
-(searched for name/value spec pairs) and HTML spec tables. Run with
-USE_BROWSER=true because listing pages are rendered with JavaScript.
-
-Detail URL pattern: /buy-used-<make>-<model>-<year>-cars-<city>-<appointmentId>/
+Scaffolded by `vehicle_scraper new-site` on 2026-11-18 from https://www.cars24.com/
+* Discovery: sitemap https://www.cars24.com/sitemap.xml, detail URLs like /[a-z0-9-]+-\d+/?$ (768 seen while probing).
+* Detail page: JSON-LD Car: yes; embedded JSON specs: no; spec section: none found, reads the whole page.
+* Warning: country unknown from the domain; pass --country (ISO code)
 """
 from __future__ import annotations
 
-from .base import register
+from .. import extract as X
+from ..mapping import RecordBuilder
+from ..models import VehicleRecord
+from .base import Listing, register
 from .html_site import HtmlSiteScraper
 
 
 @register
 class Cars24Scraper(HtmlSiteScraper):
-    name = "cars24"
-    base_url = "https://www.cars24.com"
-    country = "IN"
-    currency = "INR"
+    name = 'cars24'
+    base_url = 'https://www.cars24.com'
+    country = ''
+    currency = None
     status = "unverified"
-    notes = "Cloudflare 403 from Central America during testing; try from India or ask for a partner feed."
-    start_urls = ["https://www.cars24.com/buy-used-car/"]
-    page_url_template = "https://www.cars24.com/buy-used-car/?page={page}"
-    first_page = 2
-    link_pattern = r"/buy-used-[a-z0-9-]+-\d{6,}/?$"
-    id_pattern = r"-(\d{6,})/?$"
-    wait_selector = "a[href*='/buy-used-']"
+    notes = 'Scaffolded by new-site; review before marking verified'
+
+    sitemap_url = 'https://www.cars24.com/sitemap.xml'
+    sitemap_pattern = r"/[a-z0-9-]+-\d+/?$"
+    id_pattern = r"-(\d+)/?$"
+
+    def parse(self, listing: Listing) -> VehicleRecord:
+        soup = X.soup_of(self.fetch_html(listing.url, self.wait_selector))
+        b = RecordBuilder(self.name, listing.url, listing.listing_id)
+
+        # Most reliable sources first: the first value set for a field wins.
+        for car in X.jsonld_vehicles(soup):
+            X.apply_jsonld(b, car)
+        X.apply_html(b, soup)   # label/value pairs and equipment lists anywhere in <main>
+
+        title = soup.find("h1") or soup.find("title")
+        if title:
+            b.add_title(title.get_text(" ", strip=True))
+        desc = soup.find("meta", attrs={"name": "description"})
+        if desc and desc.get("content"):
+            b.add_free_text(desc["content"])
+
+        # TODO: labels on the sample pages that don't map to the schema yet. If one matters, add
+        # a synonym to mapping.LABEL_RULES / FEATURE_PATTERNS (with a test) or handle it here.
+        #   Buy Used Cars in Bulandshahar
+        #   Loan against car
+        #   Personal loan
+        #   Car services
+        #   Call us
+        #   Hello, Sign in Account
+        #   Hello, Sign in
+        #   Reasons to buy this car
+        #   Top features of this car
+        #   Why buy from verified sellers?
+        #   Essential features
+        #   Top model
+        #   Previous
+        #   Reg. year
+        #   KM driven
+        return self.finish(b.build())
