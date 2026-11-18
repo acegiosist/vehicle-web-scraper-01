@@ -28,6 +28,7 @@ PYTHONPATH=src python -m vehicle_scraper run --site carroya --limit 20
 PYTHONPATH=src python -m vehicle_scraper run --all --limit 50 --refresh
 PYTHONPATH=src python -m vehicle_scraper run --site cars24 --browser   # Playwright-rendered pages
 PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
+PYTHONPATH=src python -m vehicle_scraper export --format xlsx   # stdlib-only writer in xlsx.py
 PYTHONPATH=src python -m vehicle_scraper coverage
 PYTHONPATH=src python -m vehicle_scraper new-site <url> [--name --country --currency --browser --force --dry-run]
 ```

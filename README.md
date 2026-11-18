@@ -42,6 +42,7 @@ Other commands:
 ... run --all --limit 50              # every site
 ... run --site cars24 --browser       # render JavaScript pages with Playwright
 ... export --format json --site carroya
+... export --format xlsx               # every column of the vehicles table -> data/vehicles.xlsx
 ... coverage
 ```
 
@@ -140,7 +141,7 @@ src/vehicle_scraper/
   mapping.py     ES/EN label rules, feature keywords, RecordBuilder
   extract.py     JSON-LD, HTML label/value pairs, embedded JSON, anti-bot detection
   http.py        polite client: robots.txt, crawl delay, retries, Playwright fallback
-  storage.py     SQLite upsert + CSV/JSON export
+  storage.py     SQLite upsert + CSV/JSON/Excel export
   report.py      field-coverage report
   cli.py         command line
   scaffold.py    `new-site`: probe a site from a URL and generate its scraper + test

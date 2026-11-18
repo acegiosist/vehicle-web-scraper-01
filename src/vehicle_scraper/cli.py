@@ -4,6 +4,7 @@
     python -m vehicle_scraper run --site carroya --site cofino --limit 50
     python -m vehicle_scraper run --all --limit 20 --refresh
     python -m vehicle_scraper export --format csv
+    python -m vehicle_scraper export --format xlsx
     python -m vehicle_scraper coverage
     python -m vehicle_scraper new-site https://www.example-autos.com/usados --dry-run
 """
@@ -91,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--browser", action="store_true", help="render pages with Playwright")
 
     e = sub.add_parser("export", help="export stored records")
-    e.add_argument("--format", choices=["csv", "json"], default="csv")
+    e.add_argument("--format", choices=["csv", "json", "xlsx"], default="csv")
     e.add_argument("--site", default=None)
     e.add_argument("--out", type=Path, default=None)
 
@@ -141,7 +142,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(write_coverage(rows, settings.data_dir / "coverage.csv"))
         elif args.cmd == "export":
             out = args.out or settings.data_dir / f"vehicles.{args.format}"
-            n = (store.export_csv if args.format == "csv" else store.export_json)(out, args.site)
+            exporter = {"csv": store.export_csv, "json": store.export_json, "xlsx": store.export_xlsx}[args.format]
+            try:
+                n = exporter(out, args.site)
+            except PermissionError:
+                print(f"Can't write {out}: close it in Excel (or pass --out) and retry.", file=sys.stderr)
+                return 1
             print(f"Exported {n} records to {out}")
         elif args.cmd == "coverage":
             rows = store.rows()

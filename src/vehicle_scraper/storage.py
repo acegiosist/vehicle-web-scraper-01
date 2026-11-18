@@ -1,4 +1,4 @@
-"""SQLite storage (upsert by site + listing id) with CSV / JSON export."""
+"""SQLite storage (upsert by site + listing id) with CSV / JSON / Excel export."""
 from __future__ import annotations
 
 import csv
@@ -65,6 +65,13 @@ class Storage:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         return len(rows)
+
+    def export_xlsx(self, path: Path, site: Optional[str] = None) -> int:
+        """Every column of the vehicles table (not only the current schema's), one row per listing."""
+        from .xlsx import write_xlsx
+        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(vehicles)")]
+        rows = _bools_out(self.rows(site))
+        return write_xlsx(path, columns, ([r.get(c) for c in columns] for r in rows), sheet_name="vehicles")
 
     def close(self) -> None:
         self.conn.close()
