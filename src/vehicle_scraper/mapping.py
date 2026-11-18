@@ -36,8 +36,10 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("fuel_tank_capacity_l", r"tanque|tank|deposito de combustible|capacidad de combustible", None),
     ("transmission_type", r"transmision|^caja|tipo de caja|gearbox|^box$|cambios$|transmission", r"cantidad de cambios|numero de cambios|velocidades"),
     ("drivetrain", r"traccion|drivetrain|wheel drive|^drive$|tipo de traccion|sistema de traccion", r"control de traccion"),
-    ("seats", r"asientos|plazas|pasajeros|seats|capacidad de personas|passenger",
-     r"cuero|electric|calefact|ventil|memoria|abatib|plegab|fold|split|divid|fila|\brow|ajust|lumbar"),
+    ("seats", r"asientos|plazas|pasajeros|seats|seating|capacidad de personas|passenger",
+     r"cuero|electric|calefact|ventil|memoria|abatib|plegab|fold|split|divid|fila|\brow|ajust|lumbar"
+     r"|power|heat|cool|memory|leather|material|driver|conductor"
+     r"|cargo|baul|maletero|cajuela|trunk|volume|volumen|in place"),
     ("doors", r"puertas|doors?$", None),
     ("cargo_capacity_l", r"baul|maletero|cajuela|cargo|trunk|boot|portaequipaje|volumen de carga", r"carga util|payload|kg"),
     ("tire_size", r"llanta|neumatic|tire|tyre|cubierta", r"material|aleacion"),

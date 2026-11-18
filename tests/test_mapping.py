@@ -77,6 +77,24 @@ def test_seat_split_ratio_is_not_a_seat_count():
     assert b.build().seats is None
 
 
+def test_seat_count_labels_us_spec_sheets():
+    # TrueCar-style spec sheet: only "Seating Capacity" is a seat count.
+    assert match_label("Standard Seating Capacity") == "seats"
+    assert match_label("Maximum Seating Capacity") == "seats"
+    assert match_label("Cargo Capacity w/All Seats in Place") == "cargo_capacity_l"
+    assert match_label("Power Passenger Seat") is None
+    assert match_label("Front Heated Seats") is None
+    assert match_label("Passenger Volume") is None
+    assert match_label("1st Row Seat Capacity") is None
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Cargo Capacity w/All Seats in Place", "24.3")
+    b.add_pair("Power Passenger Seat", "4")
+    b.add_pair("Front Heated Seats", "Multi-Level")
+    b.add_pair("Standard Seating Capacity", "5")
+    rec = b.build()
+    assert rec.seats == 5 and rec.heated_seats is True
+
+
 def test_out_of_range_year_is_null_not_rejected():
     b = RecordBuilder("t", "u", "1")
     b.add_pair("Año", "2049")
