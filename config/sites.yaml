@@ -1,0 +1,42 @@
+# Add new sites here — no Python required.
+#
+# Each entry becomes a scraper that:
+#   1. finds listing URLs from a sitemap OR from paginated listing pages,
+#   2. reads JSON-LD (schema.org Car), embedded JSON (__NEXT_DATA__) and HTML spec tables,
+#   3. maps every label it finds to the standard schema (see src/vehicle_scraper/mapping.py).
+#
+# Run `python -m vehicle_scraper run --site <name> --limit 5 -v` and check the
+# coverage report. If labels come out unmapped, add synonyms to mapping.py, or write a
+# dedicated scraper in src/vehicle_scraper/sites/ (see cofino.py for a short example).
+#
+# Fields:
+#   name, base_url, country, currency          identity
+#   sitemap_url + sitemap_pattern              discovery option A (preferred)
+#   start_urls / page_url_template             discovery option B ({page} or {offset} placeholders)
+#   link_pattern                               regex matching detail-page URLs
+#   id_pattern                                 regex with ONE group extracting the listing id
+#   spec_selector                              optional CSS selector of the specs area
+#   wait_selector                              optional, used when USE_BROWSER=true
+#   enabled                                    false to keep an entry but skip it
+
+sites:
+  - name: example_dealer
+    enabled: false
+    base_url: https://www.example-dealer.com
+    country: NI
+    currency: USD
+    sitemap_url: https://www.example-dealer.com/sitemap.xml
+    sitemap_pattern: /inventario/[a-z0-9-]+-\d+$
+    id_pattern: -(\d+)$
+
+  - name: example_marketplace
+    enabled: false
+    base_url: https://www.example-autos.com
+    country: CR
+    currency: CRC
+    page_url_template: https://www.example-autos.com/usados?page={page}
+    first_page: 1
+    max_pages: 50
+    link_pattern: /auto/[a-z0-9-]+/\d+
+    id_pattern: /(\d+)/?$
+    spec_selector: "section.specs"

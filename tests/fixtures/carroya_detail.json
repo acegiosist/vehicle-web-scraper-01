@@ -1,0 +1,69 @@
+{
+  "data": {
+    "id": "928d091b-9e37-4938-a3f3-a091dc538590",
+    "title": "Hyundai Tucson",
+    "status": "usado",
+    "price": 44900000,
+    "brand": "Hyundai",
+    "model": "Tucson",
+    "version": "2.7 4x4 Automatica Full Equipo",
+    "year": 2010,
+    "kilometers": 109000,
+    "cylindrical": 2700,
+    "box": "Automática",
+    "fuel": "Gasolina",
+    "city": "Bogota",
+    "color": "Negro",
+    "accessories": ["Alarma", " Bloqueo Central", " Air bag delanteros", " Radio MP3", " Tapicería en cuero", " Aire acondicionado", " Vidrios eléctricos", " Espejos eléctricos"],
+    "comments": "DISPONIBLE\r\n\r\nESPECTACULAR CAMIONETA\r\nCARROCERIA WAGON\r\nEQUIPAMIENTO\r\nVIDRIOS ELECTRICOS\r\nENCENDIDO CON LLAVE\r\nCOJINERIA EN CUERO\r\nAIRE ACONDICIONADO\r\n2 AIRBAGS",
+    "main-features": [
+      {"name": "Average consumption", "description": ""},
+      {"name": "Bodywork", "description": ""},
+      {"name": "Assembly", "description": ""},
+      {"name": "Fuel type", "description": "Gasolina"},
+      {"name": "Engine Displacement", "description": "2700"},
+      {"name": "Airbag number", "description": ""},
+      {"name": "Steering system", "description": "N"},
+      {"name": "Wheel drive", "description": ""},
+      {"name": "Armored", "description": "N"},
+      {"name": "Door", "description": ""}
+    ],
+    "technical_sheet": [
+      {"autopart": "Motor", "specifications": [
+        {"name": "Cantidad de válvulas por cilindro", "value": "4"},
+        {"name": "Torque (Kg/Rev. x min)", "value": "24.6/4500"},
+        {"name": "Potencia (H.P)", "value": "175/6000"},
+        {"name": "Relación Peso / Potencia", "value": "9,102858"},
+        {"name": "Cantidad y configuración de cilindros", "value": "6 en V"},
+        {"name": "Cilindrada (c.c³)", "value": "2656"},
+        {"name": "Tracción", "value": "4x4"},
+        {"name": "Capacidad del tanque de combustible (Galones)", "value": "17.2"}
+      ]},
+      {"autopart": "Transmisión", "specifications": [
+        {"name": "Tipo de transmisión", "value": "Automática"},
+        {"name": "Cantidad de cambios adelante", "value": "4"}
+      ]},
+      {"autopart": "Sistema de Frenos", "specifications": [
+        {"name": "Control de frenos ABS", "value": "S"},
+        {"name": "Sistema EBD", "value": "S"}
+      ]},
+      {"autopart": "Ruedas", "specifications": [
+        {"name": "Material rines", "value": "Aleación"},
+        {"name": "Llantas &#40;dimensiones&#41;", "value": "235/60"},
+        {"name": "Dimensiones Rin", "value": "R16"}
+      ]},
+      {"autopart": "Dimensiones", "specifications": [
+        {"name": "Largo/ancho/alto (mts.)", "value": "4.3/1.8/1.7"},
+        {"name": "Volúmen del baúl &#40;lts&#41;", "value": "325"},
+        {"name": "Peso &#40;kgrs.&#41;", "value": "1593"}
+      ]},
+      {"autopart": "Accesorios - Seguridad", "specifications": [
+        {"name": "Exploradoras", "value": "S"},
+        {"name": "Bloqueo central", "value": "S"},
+        {"name": "ABS", "value": "S"},
+        {"name": "Barras laterales", "value": "S"},
+        {"name": "Alarma antirrobo", "value": "S"}
+      ]}
+    ]
+  }
+}

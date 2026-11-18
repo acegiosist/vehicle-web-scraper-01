@@ -1,0 +1,298 @@
+"""Unit conversion, number parsing and enum/boolean normalization.
+
+Every function returns ``None`` when it can't interpret a value: the scraper
+never guesses.
+"""
+from __future__ import annotations
+
+import html
+import re
+import unicodedata
+from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Text helpers
+# ---------------------------------------------------------------------------
+
+def strip_accents(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def norm(text: object) -> str:
+    """Lowercase, accent-free, HTML-unescaped, single-spaced text."""
+    if text is None:
+        return ""
+    s = html.unescape(str(text))
+    s = strip_accents(s).lower().replace(" ", " ")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def clean(text: object) -> Optional[str]:
+    if text is None:
+        return None
+    s = re.sub(r"\s+", " ", html.unescape(str(text))).strip(" :-–|\t\n")
+    return s or None
+
+
+# ---------------------------------------------------------------------------
+# Numbers
+# ---------------------------------------------------------------------------
+_NUM_RE = re.compile(r"-?\d[\d.,]*")
+
+
+def parse_number(value: object) -> Optional[float]:
+    """Parse the first number in a string, handling ES/EN thousand separators.
+
+    "27,770 km" -> 27770 | "44.900.000" -> 44900000 | "2.700" -> 2700
+    "1.5l" -> 1.5 | "14,5 km/l" -> 14.5 | "9,102858" -> 9.102858
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = _NUM_RE.search(html.unescape(str(value)))
+    if not m:
+        return None
+    s = m.group(0).rstrip(".,")
+    if re.fullmatch(r"-?\d{1,3}(\.\d{3})+", s):          # 44.900.000 / 2.700
+        s = s.replace(".", "")
+    elif re.fullmatch(r"-?\d{1,3}(,\d{3})+", s):         # 27,770
+        s = s.replace(",", "")
+    elif "," in s and "." in s:                            # 1.234,5 or 1,234.5
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    else:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_int(value: object) -> Optional[int]:
+    n = parse_number(value)
+    return int(round(n)) if n is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Unit conversions (label/unit text is used as a hint)
+# ---------------------------------------------------------------------------
+GAL_TO_L = 3.78541
+MPG_TO_KML = 0.425144
+CUFT_TO_L = 28.3168
+MI_TO_KM = 1.60934
+KW_TO_HP = 1.34102
+PS_TO_HP = 0.98632
+
+
+_ENGINE_LAYOUT_RE = re.compile(r"\b[vlhiw]-?\d{1,2}\b|(?<![\d.,])\d{1,2} ?(v|cilindros|valvulas|cylinders|valves)\b")
+
+
+def to_displacement_l(value: object, hint: str = "") -> Optional[float]:
+    # Drop cylinder/valve tokens first: "V6 3.5" -> 3.5, "16V 2.0" -> 2.0 (not 6 or 16).
+    n = parse_number(_ENGINE_LAYOUT_RE.sub(" ", norm(value)) if isinstance(value, str) else value)
+    if n is None or n <= 0:
+        return None
+    h = norm(f"{hint} {value}")
+    if n >= 50 or re.search(r"\bc\.?c\b|cm3|cc", h):       # cubic centimetres
+        n = n / 1000
+    return round(n, 1) if 0.5 <= n <= 10 else None
+
+
+def to_cylinders(value: object) -> Optional[int]:
+    v = norm(value)
+    m = re.search(r"\b([vlhiw])\s?-?(\d{1,2})\b", v)         # V6, L4, I-4, H4, W12
+    if m:
+        return int(m.group(2))
+    n = parse_int(v)                                          # "6 en V", "4"
+    return n if n and 1 <= n <= 16 else None
+
+
+def to_hp(value: object, hint: str = "") -> Optional[int]:
+    n = parse_number(value)                                   # "175/6000" -> 175
+    if n is None:
+        return None
+    h = norm(f"{hint} {value}")
+    if re.search(r"\bkw\b", h):
+        n *= KW_TO_HP
+    elif re.search(r"\b(cv|ps)\b", h):
+        n *= PS_TO_HP
+    n = int(round(n))
+    return n if 30 <= n <= 2000 else None
+
+
+def to_liters(value: object, hint: str = "") -> Optional[float]:
+    n = parse_number(value)
+    if n is None or n <= 0:
+        return None
+    h = norm(f"{hint} {value}")
+    if re.search(r"galon|gallon|\bgal\b", h):
+        n *= GAL_TO_L
+    elif re.search(r"cu\.? ?ft|pies cubicos|ft3", h):
+        n *= CUFT_TO_L
+    return round(n, 1)
+
+
+def to_km(value: object, hint: str = "") -> Optional[int]:
+    n = parse_number(value)
+    if n is None or n < 0:
+        return None
+    if re.search(r"\b(mi|millas|miles)\b", norm(f"{hint} {value}")):
+        n *= MI_TO_KM
+    return int(round(n))
+
+
+def to_kml(value: object, hint: str = "") -> Optional[float]:
+    n = parse_number(value)
+    if n is None or n <= 0:
+        return None
+    h = norm(f"{hint} {value}")
+    if "mpg" in h or "millas por galon" in h:
+        n *= MPG_TO_KML
+    elif re.search(r"l ?/ ?100|litros ?/ ?100", h):
+        n = 100 / n
+    elif re.search(r"km ?/ ?gal", h):
+        n /= GAL_TO_L
+    return round(n, 1) if 2 <= n <= 60 else None
+
+
+def to_kw(value: object) -> Optional[float]:
+    n = parse_number(value)
+    return round(n, 1) if n and 1 <= n <= 1000 else None
+
+
+def to_inches(value: object) -> Optional[float]:
+    v = norm(value)
+    m = re.search(r"r\s?(\d{2}(?:\.\d)?)", v)                 # "R16" or "235/60R16"
+    n = float(m.group(1)) if m else parse_number(v)
+    return n if n and 5 <= n <= 30 else None
+
+
+def to_tire_size(value: object, rim: Optional[float] = None) -> Optional[str]:
+    v = norm(value).upper().replace(" ", "")
+    m = re.search(r"(\d{3})/(\d{2})Z?R?(\d{2})?", v)
+    if not m:
+        return None
+    width, profile, r = m.groups()
+    r = r or (str(int(rim)) if rim else None)
+    return f"{width}/{profile}R{r}" if r else f"{width}/{profile}"
+
+
+# ---------------------------------------------------------------------------
+# Booleans and enums
+# ---------------------------------------------------------------------------
+_TRUE = {"s", "si", "yes", "y", "true", "1", "incluido", "incluida", "con", "x", "✓", "✔", "disponible", "estandar", "standard", "serie", "de serie"}
+_FALSE = {"n", "no", "false", "0", "sin", "-", "–", "✗", "✘", "no disponible", "no incluido", "no aplica", "n/a", "na", "ninguno"}
+
+
+def to_bool(value: object) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    v = norm(value)
+    if v in _TRUE:
+        return True
+    if v in _FALSE:
+        return False
+    return None
+
+
+def _first_match(value: object, table: list[tuple[str, str]]) -> Optional[str]:
+    v = norm(value)
+    if not v:
+        return None
+    for pattern, result in table:
+        if re.search(pattern, v):
+            return result
+    return None
+
+
+_FUEL = [
+    (r"hibrid|hybrid|\bhev\b|\bphev\b|\bmhev\b", "Hybrid"),
+    (r"electric|\bev\b|\bbev\b", "EV"),
+    (r"diesel|acpm|gasoil|gasoleo", "Diesel"),
+    (r"gasolin|nafta|bencina|petrol|gasoline|\bgas\b", "Gasoline"),
+]
+_TRANSMISSION = [
+    (r"\bcvt\b|continuamente variable|variable continua", "CVT"),
+    (r"\bdct\b|\bdsg\b|doble embrague|dual[- ]clutch|\bpdk\b", "DCT"),
+    (r"manual|mecanic|estandar|standard|sincronic", "Manual"),
+    (r"automat|\bat\b|tiptronic|steptronic|secuencial|automatic", "Automatic"),
+]
+_DRIVETRAIN = [
+    (r"\bawd\b|integral|all[- ]wheel|4matic|quattro|xdrive|4motion|sh-awd", "AWD"),
+    (r"4x4|4wd|doble traccion|four[- ]wheel", "4WD"),
+    (r"\bfwd\b|delanter|front", "FWD"),
+    (r"\brwd\b|traser|rear|propulsion", "RWD"),
+]
+_BODY = [
+    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble)|camioneta de platon|platon", "Pickup"),
+    (r"minivan|monovolumen", "Minivan"),
+    (r"station ?wagon|familiar|rural\b|estate|break\b", "Wagon"),
+    (r"\bsuv\b|crossover|todoterreno|todo terreno|campero|\bwagon\b|camioneta", "SUV"),
+    (r"\bvan\b|furgon|panel", "Van"),
+    (r"hatch|hb\b|5 ?p(uertas)?\b", "Hatchback"),
+    (r"sedan|berlina|4 ?p(uertas)?\b", "Sedan"),
+    (r"coupe|cupe", "Coupe"),
+    (r"convertible|cabrio|roadster|descapotable", "Convertible"),
+    (r"camion|truck", "Truck"),
+]
+
+
+_NATURAL_GAS_RE = re.compile(r"gas natural|gas licuado|\b(gnv|gnc|glp|cng|lpg)\b|propano")
+_COMBUSTION_RE = re.compile(r"gasolin|diesel|nafta|bencina|petrol|gasoline")
+
+
+def to_fuel(value: object) -> Optional[str]:
+    v = norm(value)
+    # CNG/LPG (or gasoline + gas bi-fuel) has no schema value -> None, never "Gasoline".
+    if _NATURAL_GAS_RE.search(v) or (re.search(r"gasolin", v) and re.search(r"\bgas\b", v)):
+        return None
+    # "Gasolina y eléctrico" is a hybrid powertrain, not an EV.
+    if re.search(r"electric", v) and _COMBUSTION_RE.search(v):
+        return "Hybrid"
+    return _first_match(v, _FUEL)
+
+
+def to_transmission(value: object) -> Optional[str]:
+    return _first_match(value, _TRANSMISSION)
+
+
+def to_drivetrain(value: object) -> Optional[str]:
+    """4x2 / 2WD are ambiguous (front or rear) -> None (caller logs a warning)."""
+    return _first_match(value, _DRIVETRAIN)
+
+
+def to_body(value: object) -> Optional[str]:
+    return _first_match(value, _BODY)
+
+
+_COUNTRIES = {
+    "japon": "Japan", "japan": "Japan", "corea": "South Korea", "korea": "South Korea",
+    "mexico": "Mexico", "brasil": "Brazil", "brazil": "Brazil", "estados unidos": "United States",
+    "usa": "United States", "eeuu": "United States", "ee.uu": "United States", "united states": "United States",
+    "alemania": "Germany", "germany": "Germany", "china": "China", "india": "India",
+    "tailandia": "Thailand", "thailand": "Thailand", "colombia": "Colombia", "argentina": "Argentina",
+    "espana": "Spain", "spain": "Spain", "francia": "France", "france": "France", "italia": "Italy",
+    "italy": "Italy", "reino unido": "United Kingdom", "inglaterra": "United Kingdom", "uk": "United Kingdom",
+    "suecia": "Sweden", "sweden": "Sweden", "indonesia": "Indonesia", "turquia": "Turkey",
+    "ecuador": "Ecuador", "chile": "Chile", "hungria": "Hungary", "eslovaquia": "Slovakia",
+    "republica checa": "Czech Republic", "canada": "Canada", "sudafrica": "South Africa",
+    "taiwan": "Taiwan", "vietnam": "Vietnam", "malasia": "Malaysia", "filipinas": "Philippines",
+    "uruguay": "Uruguay", "peru": "Peru", "venezuela": "Venezuela", "portugal": "Portugal",
+    "belgica": "Belgium", "austria": "Austria", "polonia": "Poland", "rumania": "Romania",
+}
+
+
+def to_country(value: object) -> Optional[str]:
+    v = norm(value)
+    for key, name in _COUNTRIES.items():
+        if re.search(rf"\b{re.escape(key)}\b", v):
+            return name
+    return None
+
+
+def to_year(value: object) -> Optional[int]:
+    m = re.search(r"\b(19[5-9]\d|20[0-4]\d)\b", str(value))
+    return int(m.group(1)) if m else None
