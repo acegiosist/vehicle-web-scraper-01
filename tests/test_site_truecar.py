@@ -1,7 +1,7 @@
 """Snapshot of what the truecar scraper extracted from its sample page when it was scaffolded
 (2026-11-18). After improving the parser, check the new values and update EXPECTED."""
 from vehicle_scraper.sites.base import Listing
-from vehicle_scraper.sites.truecar import TruecarScraper
+from vehicle_scraper.sites.truecar import TruecarScraper, _truecar_pairs
 
 from .conftest import FakeClient
 
@@ -57,3 +57,13 @@ def test_truecar_detail(cfg):
     rec = TruecarScraper(cfg, client=client).parse(Listing('19UDE4G77TA007881', URL))
     got = {k: v for k, v in rec.model_dump(exclude={"scraped_at", "parse_warnings"}).items() if v is not None}
     assert got == EXPECTED
+    assert rec.parse_warnings == []
+
+
+def test_truecar_pairs_fix_booleans_and_cargo_units():
+    pairs = [("Touch Screen", "t"), ("Navigation System", "F"), ("Trunk Volume Max", "24.3"),
+             ("Cargo Capacity w/All Seats in Place", "24.3 ft³"), ("Front Wheel Size", "18")]
+    assert list(_truecar_pairs(pairs)) == [
+        ("Touch Screen", "true"), ("Navigation System", "false"), ("Trunk Volume Max", "24.3 ft³"),
+        ("Cargo Capacity w/All Seats in Place", "24.3 ft³"), ("Front Wheel Size", "18"),
+    ]
