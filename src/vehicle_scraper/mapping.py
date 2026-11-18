@@ -43,7 +43,7 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("doors", r"puertas|doors?$", None),
     ("cargo_capacity_l", r"baul|maletero|cajuela|cargo|trunk|boot|portaequipaje|volumen de carga", r"carga util|payload|kg"),
     ("tire_size", r"llanta|neumatic|tire|tyre|cubierta", r"material|aleacion"),
-    ("wheel_size_in", r"\brin\b|rines|^aro|wheel size|dimensiones rin|tamano de rin|rim", r"material|aleacion|aluminio"),
+    ("wheel_size_in", r"\brin\b|rines|^aro|wheel size|dimensiones rin|tamano de rin|\brims?\b", r"material|aleacion|aluminio"),
     ("fuel_economy_kml", r"consumo|rendimiento|fuel economy|average consumption|km ?/ ?l|eficiencia", None),
     ("ev_range_km", r"autonomia|^range$|alcance electrico|ev range", None),
     ("ev_charging_speed_kw", r"carga rapida|potencia de carga|charging|carga dc|velocidad de carga", None),
@@ -241,6 +241,8 @@ class RecordBuilder:
             field = "model_year"            # In Colombia "Modelo: 2010" means the year
         if field in _NUMERIC_FIELDS and N.to_bool(value) is not None:
             field = None                      # "Con airbags": "Sí" is a feature flag, not a count
+        if field == "airbags_count" and not re.search(r"\d", str(value)):
+            field = None                      # "Side Airbags": "Front and Rear" is a location, not a count
         if field:
             if field == "body_style":
                 self.set("vehicle_type", value)

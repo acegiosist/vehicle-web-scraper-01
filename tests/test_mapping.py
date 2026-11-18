@@ -95,6 +95,26 @@ def test_seat_count_labels_us_spec_sheets():
     assert rec.seats == 5 and rec.heated_seats is True
 
 
+def test_trim_is_not_a_rim():
+    assert match_label("trim Level") != "wheel_size_in"
+    assert match_label("Door Trim") != "wheel_size_in"
+    assert match_label("is Experimental Compile") != "wheel_size_in"
+    assert match_label("Rim size") == "wheel_size_in"
+    assert match_label("Rims") == "wheel_size_in"
+    assert match_label("Front Wheel Size") == "wheel_size_in"
+
+
+def test_airbag_location_is_not_a_count():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Side Airbags", "Front and Rear")
+    b.add_pair("Airbags", "Piloto-Copiloto")
+    rec = b.build()
+    assert rec.airbags_count is None and rec.parse_warnings == []
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Bolsas de aire", "6")
+    assert b.build().airbags_count == 6
+
+
 def test_out_of_range_year_is_null_not_rejected():
     b = RecordBuilder("t", "u", "1")
     b.add_pair("Año", "2049")
