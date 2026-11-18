@@ -1,4 +1,6 @@
 """`new-site` scaffolding: URL-shape inference, probing and code generation, all offline."""
+import re
+
 import pytest
 import requests
 
@@ -57,7 +59,16 @@ def test_url_groups_year_is_not_an_id():
             "https://x.com/autos/kia-rio-2020"]
     g = S.url_groups(urls)[0]
     assert g.pattern == r"/autos/[a-z0-9-]+-\d+/?$"
-    assert g.id_pattern == r"/([^/]+)/?$"        # "2019" repeats, so the whole slug is the id
+    assert g.id_pattern == r"/([a-z0-9-]+-\d+)/?$"     # "2019" repeats, so the whole slug is the id
+
+
+def test_url_groups_id_falls_back_to_unique_segment():
+    base = "https://www.truecar.com/used-cars-for-sale/listing"
+    urls = [f"{base}/19UDE4G77TA007881/2026-acura-integra/", f"{base}/19UDE4G70TA001234/2026-acura-integra/",
+            f"{base}/1GYKNDRS6LZ120420/2020-cadillac-xt5/"]
+    g = S.url_groups(urls)[0]
+    assert g.id_pattern == r"/([A-Za-z0-9-]+)/[a-z0-9-]+/?$" and g.id_unique   # the VIN, not the model slug
+    assert re.search(g.id_pattern, urls[0]).group(1) == "19UDE4G77TA007881"
 
 
 def test_detect_pagination():
@@ -74,10 +85,13 @@ def test_detect_pagination():
 def test_clean_html_drops_scripts_and_contact_data():
     html = ('<html><head><script src="app.js"></script><style>p{}</style>'
             '<script type="application/ld+json">{"@type":"Car"}</script></head><body>'
-            '<a href="tel:+573001234567">Llamar</a> <p>ventas@dealer.com +57 300 123 4567</p></body></html>')
+            '<a href="tel:+573001234567">Llamar</a> <p>ventas@dealer.com +57 300 123 4567</p>'
+            '<p>Call (630) 286-6801 or 1-888-878-3227. VIN 1GYKNDRS6LZ120420, $34,662</p></body></html>')
     out = S.clean_html(html)
     assert "app.js" not in out and "<style" not in out and '"@type":"Car"' in out
     assert "3001234567" not in out and "ventas@dealer.com" not in out and "300 123 4567" not in out
+    assert "286-6801" not in out and "878-3227" not in out
+    assert "1GYKNDRS6LZ120420" in out and "$34,662" in out
 
 
 def test_scaffold_from_sitemap(cfg, tmp_path):

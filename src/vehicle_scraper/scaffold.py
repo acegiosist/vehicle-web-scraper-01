@@ -78,6 +78,7 @@ _UNSTABLE_CLASS = re.compile(
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _CONTACT_HREF = re.compile(r'(href=["\'])(?:tel:|mailto:|https?://(?:wa\.me|api\.whatsapp\.com)/)[^"\']*', re.I)
 _INTL_PHONE = re.compile(r"\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,4}")
+_NANP_PHONE = re.compile(r"(?<![\d-])(?:1-)?(?:\(\d{3}\) ?|\d{3}[.-])\d{3}-\d{4}(?![\d-])")
 
 
 class ScaffoldError(RuntimeError):
@@ -90,6 +91,7 @@ class UrlGroup:
     id_pattern: str         # regex with one group -> listing id
     urls: list[str]
     score: float
+    id_unique: bool = True  # False: no URL segment was unique per listing in the sample
 
 
 @dataclass
@@ -193,6 +195,7 @@ def _char_class(stems: list[str]) -> str:
 def _build_group(key: tuple, members: list[tuple[str, list[str]]]) -> Optional[UrlGroup]:
     urls = [u for u, _ in members]
     cols: list[str] = []
+    variable: list[bool] = []
     id_cols: list[tuple[int, str]] = []
     for i, (k, _) in enumerate(key):
         k = k if k in _KINDS else "slug"
@@ -209,6 +212,7 @@ def _build_group(key: tuple, members: list[tuple[str, list[str]]]) -> Optional[U
         else:
             rx, idrx = _char_class(list(stems)), ""
         cols.append(rx + ext)
+        variable.append(not (len(set(stems)) == 1 and k == "slug"))
         if k in _ID_KINDS:
             id_cols.append((i, idrx + ext))
 
@@ -220,15 +224,19 @@ def _build_group(key: tuple, members: list[tuple[str, list[str]]]) -> Optional[U
         return None                       # brand/category/static pages, not listings
 
     pattern = "/" + "/".join(cols) + "/?$"
-    id_pattern = r"/([^/]+)/?$"
-    if has_id:
-        i, idrx = id_cols[-1]
-        candidate = idrx + "".join("/" + c for c in cols[i + 1:]) + "/?$"
-        ids = [m.group(1) if (m := re.search(candidate, u)) else None for u in urls]
-        if None not in ids and len(set(ids)) == len(ids):   # e.g. "corolla-2019" is not an id
-            id_pattern = candidate
+    tail = lambda i: "".join("/" + c for c in cols[i + 1:]) + "/?$"   # noqa: E731
+    # The id must be unique per listing: "corolla-2019" or "2020-cadillac-xt5" repeat across
+    # cars, so fall back to whichever URL segment is unique (e.g. a VIN), right to left.
+    candidates = [idrx + tail(i) for i, idrx in id_cols[-1:]]
+    candidates += [f"/({cols[i]})" + tail(i) for i in reversed(range(len(cols))) if variable[i]]
+    id_pattern = next((c for c in candidates if _unique_ids(c, urls)), None)
     score = len(urls) * (1 + has_id + frac_make + frac_year)
-    return UrlGroup(pattern, id_pattern, urls, score)
+    return UrlGroup(pattern, id_pattern or r"/([^/]+)/?$", urls, score, id_unique=id_pattern is not None)
+
+
+def _unique_ids(id_pattern: str, urls: list[str]) -> bool:
+    ids = [m.group(1) if (m := re.search(id_pattern, u)) else None for u in urls]
+    return None not in ids and len(set(ids)) == len(ids)
 
 
 def url_groups(urls: list[str], min_size: int = 2) -> list[UrlGroup]:
@@ -401,6 +409,7 @@ def clean_html(html: str) -> str:
         svg.attrs = {}
     text = _CONTACT_HREF.sub(r"\1#", str(soup))
     text = _EMAIL.sub("email@example.com", text)
+    text = _NANP_PHONE.sub("000-000-0000", text)
     return _INTL_PHONE.sub("+00 000 000 0000", text)
 
 
@@ -563,6 +572,9 @@ def probe_site(url: str, *, client, name: Optional[str] = None, country: Optiona
         raise ScaffoldError("could not find listing URLs in a sitemap or among the page's links. "
                             "Pass the URL of a search/listing page that links to individual cars.")
     g = discovery.group
+    if not g.id_unique:
+        warnings.append("no part of the detail URLs was unique per listing, so listing ids may collide "
+                        "and different cars be skipped as duplicates; set id_pattern by hand")
     if re.search(g.pattern, url.split("?")[0]):
         first_is_detail = True
 
