@@ -20,6 +20,16 @@ PYTHONPATH=src python -m vehicle_scraper run --site carroya --site cofino --limi
 
 (Or `pip install -e .` and use the `vehicle-scraper` command instead of `PYTHONPATH=src python -m vehicle_scraper`.)
 
+**Windows (PowerShell):**
+
+```powershell
+.venv\Scripts\Activate.ps1
+# if script execution is blocked, run once: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+$env:PYTHONPATH="src"
+python -m vehicle_scraper run --site carroya --limit 2000
+```
+
 Each run:
 1. saves/updates records in `data/vehicles.sqlite` (one row per site + listing id; re-runs skip
    stored listings unless you pass `--refresh`),

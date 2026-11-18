@@ -113,3 +113,18 @@ debugging.
 - **chileautos.cl** (Chile) — blocked by a DataDome CAPTCHA on every page; scraper detects and
   skips it rather than solving the CAPTCHA.
 - **cars24.com** (India) — unverified; Cloudflare 403s from outside India, likely geo-restricted.
+
+## Git Commit & Push Workflow
+When the user says "commit my changes" or "commit and push my changes", perform the following steps automatically:
+1. Run `git status` and `git diff` (staged and unstaged) to inspect all changes.
+2. Check for secrets, `.env` files, debug statements (`console.log`, `print`), or unrelated files. Do not stage or commit them.
+3. Stage only the relevant files using `git add`.
+4. Commit using the Conventional Commits format (`<type>(<optional scope>): <short summary>`):
+   - Use standard types (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`).
+   - Keep the subject line lowercase, imperative mood, and under 50 characters.
+   - Add a concise body explaining *why* the change was made if the change is non-trivial.
+5. **If the user specifically said "commit and push my changes"**:
+   - Check the current branch (`git branch --show-current`).
+   - If the branch is `main` or `master`, ask for confirmation before pushing.
+   - Otherwise, run `git push` (or `git push -u origin <branch>` if no upstream is set).
+6. Output the resulting commit hash, message, and current `git status`.
