@@ -96,7 +96,8 @@ def to_displacement_l(value: object, hint: str = "") -> Optional[float]:
     if n is None or n <= 0:
         return None
     h = norm(f"{hint} {value}")
-    if n >= 50 or re.search(r"\bc\.?c\b|cm3|cc", h):       # cubic centimetres
+    # Word-bounded: a bare "cc" would also match inside "inyeccion" (injection).
+    if n >= 50 or re.search(r"\bc\.?c\b|cm3", h):       # cubic centimetres
         n = n / 1000
     return round(n, 1) if 0.5 <= n <= 10 else None
 

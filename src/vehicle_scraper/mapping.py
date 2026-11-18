@@ -231,6 +231,8 @@ class RecordBuilder:
         """Map a label/value pair. Returns the field it was mapped to (if any)."""
         if value is None or N.clean(value) is None:
             return None
+        if isinstance(value, str) and value.strip().lower() == "null":
+            return None    # some APIs (carroya) send the literal string "null" for unset fields
         field = match_label(label)
         hint = f"{label} {value}"
         if field == "model" and N.to_year(value) and re.fullmatch(r"\s*\d{4}\s*", str(value)):
