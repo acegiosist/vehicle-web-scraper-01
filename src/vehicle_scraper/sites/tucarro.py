@@ -86,5 +86,6 @@ class TuCarroScraper(SiteScraper):
                 b.set(field, struct.get("number", value) if field not in ("make", "model", "trim") else value, hint)
             else:
                 b.add_pair(attr.get("name", ""), value)
+        b.add_title(item.get("title"))
         b.add_free_text(item.get("title"))
         return self.finish(b.build())

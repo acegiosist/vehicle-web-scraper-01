@@ -95,9 +95,13 @@ class CarroYaScraper(SiteScraper):
             for spec in group.get("specifications") or []:
                 b.add_pair(spec.get("name", ""), spec.get("value"))
 
-        # 4) accessories = equipment present on this car
+        # 4) model + version text: sellers often leave "Bodywork"/"Wheel drive" blank but
+        #    write "2.0 Sedan Touring Aut" or "IX35 4x4" in the version.
+        b.add_title(d.get("model"), d.get("version"))
+
+        # 5) accessories = equipment present on this car
         b.add_feature_list([a.strip() for a in d.get("accessories") or []])
 
-        # 5) seller comments (only adds clearly mentioned features)
+        # 6) seller comments (only adds clearly mentioned features)
         b.add_free_text(d.get("comments"))
         return self.finish(b.build())

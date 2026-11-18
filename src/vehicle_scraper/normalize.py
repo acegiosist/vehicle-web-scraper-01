@@ -244,6 +244,41 @@ _NATURAL_GAS_RE = re.compile(r"gas natural|gas licuado|\b(gnv|gnc|glp|cng|lpg)\b
 _COMBUSTION_RE = re.compile(r"gasolin|diesel|nafta|bencina|petrol|gasoline")
 
 
+# Strict matchers for titles / trim names ("Mazda 3 2.0 Sedan Touring Aut"): only explicit
+# tokens count. The generic tables above would misread names ("Frontier" -> FWD) or guess
+# from door counts ("5 puertas" -> Hatchback), which is fine for a body-type field but not here.
+_BODY_EXPLICIT = [
+    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble)", "Pickup"),
+    (r"\bminivan\b|monovolumen", "Minivan"),
+    (r"station ?wagon", "Wagon"),
+    (r"\bsuv\b|\bcrossover\b", "SUV"),
+    (r"\bvan\b|\bfurgon\b", "Van"),
+    (r"hatch ?back|\bhatch\b", "Hatchback"),
+    (r"\bsedan\b", "Sedan"),
+    (r"\bcoupe\b|\bcupe\b", "Coupe"),
+    (r"\bconvertible\b|\bcabrio(let)?\b|\broadster\b|descapotable", "Convertible"),
+]
+_DRIVETRAIN_EXPLICIT = [
+    (r"\bawd\b|4matic|quattro|xdrive|4motion|sh-awd|traccion integral", "AWD"),
+    (r"\b4x4\b|\b4wd\b", "4WD"),
+    (r"\bfwd\b", "FWD"),
+    (r"\brwd\b", "RWD"),
+]
+
+
+def body_from_title(value: object) -> Optional[str]:
+    return _first_match(value, _BODY_EXPLICIT)
+
+
+def drivetrain_from_title(value: object) -> Optional[str]:
+    return _first_match(value, _DRIVETRAIN_EXPLICIT)
+
+
+def doors_from_title(value: object) -> Optional[int]:
+    m = re.search(r"\b([2-5]) ?(p|ptas|puertas|doors?)\b", norm(value))
+    return int(m.group(1)) if m else None
+
+
 def to_fuel(value: object) -> Optional[str]:
     v = norm(value)
     # CNG/LPG (or gasoline + gas bi-fuel) has no schema value -> None, never "Gasoline".

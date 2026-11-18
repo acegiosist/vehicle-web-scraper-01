@@ -84,3 +84,39 @@ def test_out_of_range_year_is_null_not_rejected():
     rec = b.build()                                 # must not raise ValidationError
     assert rec.model_year is None and rec.make == "Mazda"
     assert any("model_year" in w for w in rec.parse_warnings)
+
+
+def _titled(*parts):
+    b = RecordBuilder("t", "u", "1")
+    b.add_title(*parts)
+    return b.build()
+
+
+def test_title_explicit_body_drivetrain_doors():
+    r = _titled("3", "2.0 Sedan Touring Aut")
+    assert r.body_style == "Sedan" and r.vehicle_type == "Sedan"
+    assert _titled("Frontier NP300", "2.5 4x2 Doble Cabina Pro-D Diesel").body_style == "Pickup"
+    assert _titled("Tucson", "IX35 4x4 2.0 Gasolina Mecanica").drivetrain == "4WD"
+    assert _titled("Clase GLK", "220 CDI 4Matic 2.2 Diesel").drivetrain == "AWD"
+    assert _titled("Blazer 4x4", "Automatica").drivetrain == "4WD"
+    assert _titled("206", "1.4 X-Desing 5 Puertas").doors == 5
+    assert _titled("Grand Touring 2.5 Suv Automatica").body_style == "SUV"
+
+
+def test_title_never_guesses():
+    r = _titled("Frontier NP300", "2.5 4x2 Doble Cabina")
+    assert r.drivetrain is None                       # not FWD from "Frontier"
+    assert any("4x2" in w for w in r.parse_warnings)
+    assert _titled("DS 7", "Crossback Audace 1.6").body_style is None
+    assert _titled("206", "1.4 5 Puertas").body_style is None    # doors alone don't imply a body
+    assert _titled("HB20s", "Advance").body_style is None
+    assert _titled("Duster Oroch", "Intens").body_style is None
+
+
+def test_title_does_not_override_structured_specs():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Carrocería", "SUV")
+    b.add_pair("Tracción", "Delantera")
+    b.add_title("Mazda 3", "2.0 Sedan 4x4")
+    r = b.build()
+    assert r.body_style == "SUV" and r.drivetrain == "FWD"

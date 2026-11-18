@@ -273,6 +273,26 @@ class RecordBuilder:
             if m:
                 self.set("airbags_count", m.group(1))
 
+    def add_title(self, *parts: Optional[str]) -> None:
+        """Listing title / model / trim name: reads only explicit body, drivetrain and door
+        tokens ("Sedan", "Doble Cabina", "4x4", "4Matic", "5 Puertas"). Call it after the
+        structured sources, so a real spec field always wins."""
+        text = " ".join(p for p in parts if p)
+        if not text:
+            return
+        body = N.body_from_title(text)
+        if body:
+            self.set("body_style", body)
+            self.set("vehicle_type", body)
+        drive = N.drivetrain_from_title(text)
+        if drive:
+            self.set("drivetrain", drive)
+        elif "drivetrain" not in self.values and re.search(r"\b(4x2|2wd|2x4)\b", N.norm(text)):
+            self.warn("drivetrain '4x2' is 2WD but front/rear not stated")
+        doors = N.doors_from_title(text)
+        if doors:
+            self.set("doors", doors)
+
     def add_free_text(self, text: Optional[str]) -> None:
         """Seller comments: only sets True for clearly mentioned features."""
         if not text:
