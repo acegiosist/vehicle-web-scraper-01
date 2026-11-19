@@ -54,7 +54,9 @@ EXPECTED = {
 
 def test_truecar_detail(cfg):
     client = FakeClient({'/used-cars-for-sale/listing/19UDE4G77TA007881/2026-acura-integra/': "truecar_detail.html"})
-    rec = TruecarScraper(cfg, client=client).parse(Listing('19UDE4G77TA007881', URL))
+    listing = Listing('19UDE4G77TA007881', URL)
+    rec = TruecarScraper(cfg, client=client).parse(listing)
+    assert listing.listed_at.isoformat() == "2026-10-02T07:45:00+00:00"   # page's listedAt
     got = {k: v for k, v in rec.model_dump(exclude={"scraped_at", "parse_warnings"}).items() if v is not None}
     assert got == EXPECTED
     assert rec.parse_warnings == []

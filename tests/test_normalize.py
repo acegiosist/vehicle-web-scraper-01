@@ -137,3 +137,19 @@ def test_fuel_gas_and_mixed():
     assert N.to_fuel("Diesel - Eléctrico") == "Hybrid"
     assert N.to_fuel("Eléctrico") == "EV"
     assert N.to_fuel("Gasolina - inyección electrónica") == "Gasoline"
+
+
+@pytest.mark.parametrize("raw,iso", [
+    ("2026-11-14T20:40:46.000Z", "2026-11-14T20:40:46+00:00"),        # carroya search
+    ("2026-11-19T21:41:39.000+0000", "2026-11-19T21:41:39+00:00"),    # carroya detail
+    ("2026-10-02T07:45:00+00:00", "2026-10-02T07:45:00+00:00"),       # truecar listedAt
+    ("2026-10-02T02:45:00-05:00", "2026-10-02T07:45:00+00:00"),
+    ("2026-09-19", "2026-09-19T00:00:00+00:00"),                      # sitemap lastmod
+])
+def test_to_datetime(raw, iso):
+    assert N.to_datetime(raw).isoformat() == iso
+
+
+@pytest.mark.parametrize("raw", [None, "", "hace 3 días", 20261114, "2026-13-01"])
+def test_to_datetime_unparseable(raw):
+    assert N.to_datetime(raw) is None

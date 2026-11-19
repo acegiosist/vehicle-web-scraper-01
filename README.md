@@ -41,6 +41,7 @@ Other commands:
 ```bash
 ... run --all --limit 50              # every site
 ... run --site cars24 --browser       # render JavaScript pages with Playwright
+... run --site cars24 --limit 50 --max-age 5   # only listings posted in the last 5 years (also 6m, 2w, 30d)
 ... export --format json --site carroya
 ... export --format xlsx               # vehicles table minus parse_warnings -> data/vehicles.xlsx
 ... coverage

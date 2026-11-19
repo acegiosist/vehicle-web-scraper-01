@@ -12,6 +12,7 @@ from typing import Any, Iterable, Iterator
 from .. import extract as X
 from ..mapping import RecordBuilder, match_label
 from ..models import VehicleRecord
+from ..normalize import to_datetime
 from .base import Listing, register
 from .html_site import HtmlSiteScraper
 
@@ -41,8 +42,12 @@ class TruecarScraper(HtmlSiteScraper):
     id_pattern = r"/([A-Za-z0-9-]+)/[a-z0-9-]+/?$"
 
     def parse(self, listing: Listing) -> VehicleRecord:
-        soup = X.soup_of(self.fetch_html(listing.url, self.wait_selector))
+        html = self.fetch_html(listing.url, self.wait_selector)
+        soup = X.soup_of(html)
         b = RecordBuilder(self.name, listing.url, listing.listing_id)
+        # The page's own posting date beats the sitemap <lastmod> that discovery set.
+        m = re.search(r'"listedAt":"([^"]+)"', html)
+        listing.listed_at = (to_datetime(m.group(1)) if m else None) or listing.listed_at
 
         # Most reliable sources first: the first value set for a field wins.
         for car in X.jsonld_vehicles(soup):

@@ -29,6 +29,9 @@ class Cars24Scraper(HtmlSiteScraper):
     # new-car and RTO-registration pages in the sitemap.
     sitemap_pattern = r"/buy-used-[a-z0-9-]+-\d+/?$"
     id_pattern = r"-(\d+)/?$"
+    # Listing date: the detail page has none, so `run --max-age` relies on the per-URL sitemap
+    # <lastmod> (set by HtmlSiteScraper.discover). It's the last-modified date, so an edited
+    # listing looks newer than when it was first posted.
 
     def parse(self, listing: Listing) -> VehicleRecord:
         soup = X.soup_of(self.fetch_html(listing.url, self.wait_selector))

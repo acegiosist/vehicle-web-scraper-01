@@ -17,7 +17,7 @@ import re
 from typing import Iterator, Optional
 
 from ..mapping import RecordBuilder
-from ..normalize import strip_accents
+from ..normalize import strip_accents, to_datetime
 from ..models import VehicleRecord
 from .base import Listing, SiteScraper, register
 
@@ -61,7 +61,10 @@ class CarroYaScraper(SiteScraper):
                 if not vid or vid in seen:
                     continue
                 seen.add(vid)
-                yield Listing(vid, f"{self.base_url}/detalle/{self.status_filter}/x/x/0/x/{vid}")
+                # clfechapub = first published; cfechapublicacion moves on every republish/edit
+                listed = to_datetime(it.get("clfechapub")) or to_datetime(it.get("cfecharegistro"))
+                yield Listing(vid, f"{self.base_url}/detalle/{self.status_filter}/x/x/0/x/{vid}",
+                              listed_at=listed)
                 n += 1
                 if limit is not None and n >= limit:
                     return

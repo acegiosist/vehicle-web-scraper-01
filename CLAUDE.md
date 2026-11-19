@@ -27,6 +27,7 @@ PYTHONPATH=src python -m vehicle_scraper sites                      # list sites
 PYTHONPATH=src python -m vehicle_scraper run --site carroya --limit 20
 PYTHONPATH=src python -m vehicle_scraper run --all --limit 50 --refresh
 PYTHONPATH=src python -m vehicle_scraper run --site cars24 --browser   # Playwright-rendered pages
+PYTHONPATH=src python -m vehicle_scraper run --site cars24 --limit 50 --max-age 5   # posted in last 5y (6m, 2w, 30d)
 PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
 PYTHONPATH=src python -m vehicle_scraper export --format xlsx   # stdlib-only writer in xlsx.py
 PYTHONPATH=src python -m vehicle_scraper coverage
@@ -41,6 +42,12 @@ There is no lint/format command configured in this repo.
 fetches/reads it and builds a `VehicleRecord` → `cli.run_site` stores it (SQLite, skipping
 already-stored listings unless `--refresh`) → at the end of a run, CSV export + a per-field
 coverage report are written.
+
+**Listing age (`run --max-age`)** filters on `Listing.listed_at` (when the listing was posted,
+UTC), not on `model_year`. `discover()` sets it when known up front — CarroYa's `clfechapub`, or
+the sitemap `<lastmod>` via `SiteScraper.sitemap_entries` — so old listings are skipped without
+fetching; `parse()` may overwrite it (TrueCar's page `listedAt`). Listings with no date at all
+aren't saved under `--max-age`, and `--limit` then counts only listings that pass.
 
 **Two ways a site is implemented**, both registered in a shared `REGISTRY` (`sites/base.py`):
 - A **dedicated scraper** (`sites/carroya.py`, `cofino.py`, `tucarro.py`, `chileautos.py`,

@@ -8,11 +8,29 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
+from datetime import datetime, timezone
 from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Text helpers
 # ---------------------------------------------------------------------------
+
+
+def to_datetime(value: object) -> Optional[datetime]:
+    """ISO-8601 date/datetime -> timezone-aware UTC datetime.
+
+    Accepts '2026-11-14T20:40:46.000Z', '2026-11-19T21:41:39.000+0000', '2026-10-02' etc.
+    A value without a timezone is taken as UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    s = value.strip().replace("Z", "+00:00")
+    s = re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", s)          # +0000 -> +00:00 (py3.10 fromisoformat)
+    s = re.sub(r"(\.\d{6})\d+", r"\1", s)                    # >6 fractional digits
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt).astimezone(timezone.utc)
 
 def strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))

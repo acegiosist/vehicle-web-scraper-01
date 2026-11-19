@@ -3,6 +3,7 @@
     python -m vehicle_scraper sites
     python -m vehicle_scraper run --site carroya --site cofino --limit 50
     python -m vehicle_scraper run --all --limit 20 --refresh
+    python -m vehicle_scraper run --site cars24 --limit 50 --max-age 5
     python -m vehicle_scraper export --format csv
     python -m vehicle_scraper export --format xlsx
     python -m vehicle_scraper coverage
@@ -13,8 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -32,22 +34,56 @@ SITES_YAML = next((p for p in (Path("config/sites.yaml"),
                   Path("config/sites.yaml"))
 
 
-def run_site(name: str, store: Storage, limit: int | None, refresh: bool) -> dict:
+AGE_UNITS = {"d": 1, "w": 7, "m": 30, "y": 365}
+
+
+def parse_max_age(text: str) -> timedelta:
+    """'5' / '5y' -> 5 years, '6m' -> 6 months (30 d), '2w', '30d'. Used by ``run --max-age``."""
+    m = re.fullmatch(r"\s*(\d+)\s*([dwmy]?)\s*", str(text).lower())
+    if not m:
+        raise argparse.ArgumentTypeError(f"invalid age {text!r}: use e.g. 5 (years), 5y, 6m, 2w, 30d")
+    return timedelta(days=int(m.group(1)) * AGE_UNITS[m.group(2) or "y"])
+
+
+def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
+             listed_since: datetime | None = None) -> dict:
+    """Scrape one site. With ``listed_since``, only listings posted at or after it are saved:
+    listings known (from discovery) to be older are skipped without fetching, and listings with
+    no listing date at all are not saved. ``limit`` then counts only listings that pass."""
     cls = REGISTRY[name]
-    stats = {"site": name, "saved": 0, "skipped": 0, "errors": 0, "status": "ok"}
+    stats = {"site": name, "saved": 0, "skipped": 0, "errors": 0, "too_old": 0, "no_date": 0,
+             "status": "ok"}
     try:
         scraper = cls(settings)
     except RuntimeError as e:                     # e.g. missing API token
         log.error("[%s] %s", name, e)
         return stats | {"status": f"not configured: {e}"}
     raw_dir = settings.data_dir / "raw" / name
+    passed = 0                                    # listings that got past the age filter
     try:
-        for listing in scraper.discover(limit=limit):
+        # Without an age filter discovery itself stops at `limit`; with one, we keep discovering
+        # until `limit` listings have passed it.
+        for listing in scraper.discover(limit=limit if listed_since is None else None):
+            if listed_since is not None:
+                if limit is not None and passed >= limit:
+                    break
+                if listing.listed_at is not None and listing.listed_at < listed_since:
+                    stats["too_old"] += 1         # rejected before fetching the page
+                    continue
             if not refresh and store.has(name, listing.listing_id):
                 stats["skipped"] += 1
+                passed += 1
                 continue
             try:
-                rec = scraper.parse(listing)
+                rec = scraper.parse(listing)      # may refine listing.listed_at from the page
+                if listed_since is not None:
+                    if listing.listed_at is None:
+                        stats["no_date"] += 1
+                        continue
+                    if listing.listed_at < listed_since:
+                        stats["too_old"] += 1
+                        continue
+                passed += 1
                 store.save(rec)
                 stats["saved"] += 1
                 if settings.save_raw:
@@ -58,9 +94,11 @@ def run_site(name: str, store: Storage, limit: int | None, refresh: bool) -> dic
                 raise
             except (ValidationError, ValueError, KeyError) as e:
                 stats["errors"] += 1
+                passed += 1
                 log.warning("[%s] could not parse %s: %s", name, listing.url, e)
             except Exception as e:  # noqa: BLE001 - one bad listing must not stop the run
                 stats["errors"] += 1
+                passed += 1
                 log.exception("[%s] error on %s: %s", name, listing.url, e)
     except BlockedError as e:
         stats["status"] = f"blocked: {e}"
@@ -89,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--all", action="store_true", help="run every site")
     r.add_argument("--limit", type=int, default=None, help="max listings per site")
     r.add_argument("--refresh", action="store_true", help="re-scrape listings already stored")
+    r.add_argument("--max-age", type=parse_max_age, default=None, metavar="AGE",
+                   help="only save listings posted within AGE: 5 (years), 5y, 6m, 2w, 30d. "
+                        "Uses the site's listing date (API field or sitemap <lastmod>); "
+                        "listings without one are not saved")
     r.add_argument("--browser", action="store_true", help="render pages with Playwright")
 
     e = sub.add_parser("export", help="export stored records")
@@ -129,10 +171,17 @@ def main(argv: list[str] | None = None) -> int:
                 p.error(f"choose sites with --site or --all (unknown: {unknown}); available: {sorted(REGISTRY)}")
             if args.browser:
                 settings.use_browser = True
-            results = [run_site(n, store, args.limit, args.refresh) for n in names]
+            since = None if args.max_age is None else datetime.now(timezone.utc) - args.max_age
+            if since is not None:
+                print(f"Only saving listings posted on or after {since:%Y-%m-%d %H:%M} UTC")
+            results = [run_site(n, store, args.limit, args.refresh, since) for n in names]
             print("\nRun summary:")
             for s in results:
-                print(f"  {s['site']:<12} saved={s['saved']:<5} skipped={s['skipped']:<5} errors={s['errors']:<4} {s['status']}")
+                age = f"too_old={s['too_old']:<5} no_date={s['no_date']:<4} " if since is not None else ""
+                print(f"  {s['site']:<12} saved={s['saved']:<5} skipped={s['skipped']:<5} {age}"
+                      f"errors={s['errors']:<4} {s['status']}")
+                if since is not None and s["no_date"] and not (s["saved"] or s["too_old"]):
+                    print(f"  {'':<12} ^ this site gave no listing dates, so --max-age saved nothing")
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             n = store.export_csv(settings.data_dir / f"vehicles_{stamp}.csv")
             print(f"\nExported {n} records to {settings.data_dir / f'vehicles_{stamp}.csv'}")

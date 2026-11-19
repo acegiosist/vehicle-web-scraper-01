@@ -53,8 +53,8 @@ class HtmlSiteScraper(SiteScraper):
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:
         if self.sitemap_url:
-            for url in take(self.sitemap_urls(self.sitemap_url, self.sitemap_pattern), limit):
-                yield Listing(self._listing_id(url), url)
+            for url, lastmod in take(self.sitemap_entries(self.sitemap_url, self.sitemap_pattern), limit):
+                yield Listing(self._listing_id(url), url, listed_at=lastmod)
             return
         seen: set[str] = set()
         for page_url in self._page_urls():

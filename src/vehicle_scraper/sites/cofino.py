@@ -27,10 +27,10 @@ class CofinoScraper(SiteScraper):
     notes = "Dealer site; publishes few specs (no equipment list)."
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:
-        urls = self.sitemap_urls(f"{self.base_url}/sitemap.xml", r"/catalogo/[a-z0-9-]+-\d+/?$")
-        for url in take(urls, limit):
+        entries = self.sitemap_entries(f"{self.base_url}/sitemap.xml", r"/catalogo/[a-z0-9-]+-\d+/?$")
+        for url, lastmod in take(entries, limit):
             code = re.search(r"-(\d+)/?$", url).group(1)
-            yield Listing(listing_id=code, url=url)
+            yield Listing(listing_id=code, url=url, listed_at=lastmod)
 
     def parse(self, listing: Listing) -> VehicleRecord:
         html = self.fetch_html(listing.url, wait_selector="h2")

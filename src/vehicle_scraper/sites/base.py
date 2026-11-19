@@ -13,12 +13,14 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Iterator, Optional
 from xml.etree import ElementTree as ET
 
 from ..config import Settings, settings as default_settings
 from ..http import PoliteClient
 from ..models import VehicleRecord
+from ..normalize import to_datetime
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +37,10 @@ class Listing:
     listing_id: str
     url: str
     payload: dict = field(default_factory=dict)   # anything discover() already knows
+    # When the listing was posted (UTC), if the site says. Set by discover() when known up front
+    # (API field, sitemap <lastmod>) so `run --max-age` can skip old listings without fetching
+    # them; parse() may overwrite it with a better date found on the detail page.
+    listed_at: Optional[datetime] = None
 
 
 class SiteScraper(ABC):
@@ -66,8 +72,14 @@ class SiteScraper(ABC):
             return self.client.render(url, wait_selector=wait_selector).text
         return self.client.get(url).text
 
-    def sitemap_urls(self, sitemap_url: str, pattern: str, _depth: int = 0) -> Iterator[str]:
+    def sitemap_urls(self, sitemap_url: str, pattern: str) -> Iterator[str]:
         """Yield URLs matching ``pattern`` from a sitemap (follows sitemap indexes)."""
+        for url, _ in self.sitemap_entries(sitemap_url, pattern):
+            yield url
+
+    def sitemap_entries(self, sitemap_url: str, pattern: str,
+                        _depth: int = 0) -> Iterator[tuple[str, Optional[datetime]]]:
+        """Like ``sitemap_urls`` but also yields each URL's ``<lastmod>`` (UTC) or None."""
         xml = self.client.get(sitemap_url).text
         try:
             root = ET.fromstring(xml.encode())
@@ -77,12 +89,12 @@ class SiteScraper(ABC):
         ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
         for loc in root.findall(".//s:sitemap/s:loc", ns):
             if _depth < 3:
-                yield from self.sitemap_urls(loc.text.strip(), pattern, _depth + 1)
+                yield from self.sitemap_entries(loc.text.strip(), pattern, _depth + 1)
         rx = re.compile(pattern)
-        for loc in root.findall(".//s:url/s:loc", ns):
-            url = (loc.text or "").strip()
+        for node in root.findall(".//s:url", ns):
+            url = (node.findtext("s:loc", "", ns) or "").strip()
             if rx.search(url):
-                yield url
+                yield url, to_datetime(node.findtext("s:lastmod", None, ns))
 
     def finish(self, record: VehicleRecord) -> VehicleRecord:
         if self.currency and (record.currency is None or record.currency != self.currency):
