@@ -56,6 +56,8 @@ def test_storage_export_xlsx_has_all_columns(cfg, tmp_path, monkeypatch):
     store.conn.execute("UPDATE vehicles SET legacy_col='kept'")
     store.conn.commit()
     columns = [r[1] for r in store.conn.execute("PRAGMA table_info(vehicles)")]
+    assert "parse_warnings" in columns
+    columns.remove("parse_warnings")                                    # left out of the Excel file
     store.close()
 
     monkeypatch.setattr(cli, "settings", cfg)
@@ -64,6 +66,8 @@ def test_storage_export_xlsx_has_all_columns(cfg, tmp_path, monkeypatch):
     cells = _cells(_sheet(out))
     header = [cells[f"{col_letter(i)}1"][1] for i in range(len(columns))]
     assert header == columns and header[-1] == "legacy_col"
+    assert f"{col_letter(len(columns))}1" not in cells                  # no extra column
+    assert "parse_warnings" not in header
     values = {h: cells.get(f"{col_letter(i)}2", (None, None)) for i, h in enumerate(header)}
     assert values["make"] == ("inlineStr", "Mazda")
     assert values["abs"] == ("b", "1")

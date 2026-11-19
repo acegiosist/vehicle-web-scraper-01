@@ -9,6 +9,8 @@ from typing import Iterable, Optional
 
 from .models import ALL_FIELDS, VehicleRecord
 
+XLSX_EXCLUDED = {"parse_warnings"}          # debugging column: kept in SQLite/CSV/JSON, not in Excel
+
 
 class Storage:
     def __init__(self, db_path: Path):
@@ -67,9 +69,10 @@ class Storage:
         return len(rows)
 
     def export_xlsx(self, path: Path, site: Optional[str] = None) -> int:
-        """Every column of the vehicles table (not only the current schema's), one row per listing."""
+        """Every column of the vehicles table (not only the current schema's) except
+        XLSX_EXCLUDED, one row per listing."""
         from .xlsx import write_xlsx
-        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(vehicles)")]
+        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(vehicles)") if r[1] not in XLSX_EXCLUDED]
         rows = _bools_out(self.rows(site))
         return write_xlsx(path, columns, ([r.get(c) for c in columns] for r in rows), sheet_name="vehicles")
 

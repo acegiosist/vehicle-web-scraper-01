@@ -42,7 +42,7 @@ Other commands:
 ... run --all --limit 50              # every site
 ... run --site cars24 --browser       # render JavaScript pages with Playwright
 ... export --format json --site carroya
-... export --format xlsx               # every column of the vehicles table -> data/vehicles.xlsx
+... export --format xlsx               # vehicles table minus parse_warnings -> data/vehicles.xlsx
 ... coverage
 ```
 
