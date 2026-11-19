@@ -119,12 +119,16 @@ def run(args: argparse.Namespace) -> int:
 
     if cmd == "ai-ingest":
         from .ai_batch import _run, ingest, status
-        st = status(engine, _client(), args.run)
-        if st.get("status") != "ended":
-            print(f"Batch not finished yet: {st}", file=sys.stderr)
-            return 1
-        run_row = _run(engine, args.run)
-        rep = ingest(engine, _client().messages.batches.results(run_row["batch_id"]), run_row["id"])
+        # One client for the whole command, kept open until the results are read: results() streams the
+        # JSONL over the client's connection, and a throwaway client gets garbage-collected (closing that
+        # connection) mid-download -> "WinError 10038 ... not a socket".
+        with _client() as client:
+            st = status(engine, client, args.run)
+            if st.get("status") != "ended":
+                print(f"Batch not finished yet: {st}", file=sys.stderr)
+                return 1
+            run_row = _run(engine, args.run)
+            rep = ingest(engine, client.messages.batches.results(run_row["batch_id"]), run_row["id"])
         print(rep.text())
         print("\nRebuilding the catalog with the accepted decisions:")
         print(build_catalog(engine, load_raw_rows(raw_db)).text())

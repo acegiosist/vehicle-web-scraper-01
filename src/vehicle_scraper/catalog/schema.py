@@ -243,7 +243,8 @@ ai_run = Table(
 
 ai_decision = Table(
     "ai_decision", metadata,
-    Column("input_hash", String(64), primary_key=True),    # sha256(prompt_version + make + model + trim)
+    Column("input_hash", String(64), primary_key=True),    # ai_batch.item_hash: sha256(prompt_version|kind|make|key)
+    # key = model match_key for models; raw trim alias for trims (no model, so a model merge doesn't re-ask)
     Column("ai_run_id", Integer, ForeignKey("ai_run.id", ondelete="SET NULL")),
     Column("custom_id", String(64), nullable=False),
     Column("item_kind", String(10), nullable=False),       # model | trim

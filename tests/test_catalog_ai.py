@@ -134,6 +134,57 @@ def test_failed_requests_are_requeued(engine, tmp_path):
     assert len(again.requests) == 1                                             # asked again next time
 
 
+class _StreamingClient:
+    """Mimics the SDK: results() streams over the client's connection, which closes when the client
+    is closed or garbage-collected. No reference cycle, so a throwaway client dies right away."""
+    def __init__(self, results, state):
+        def retrieve(batch_id):
+            return SimpleNamespace(id=batch_id, processing_status="ended", request_counts=SimpleNamespace(
+                succeeded=len(results), processing=0, errored=0, expired=0, canceled=0))
+
+        def stream(batch_id):
+            for r in results:
+                if state["closed"]:
+                    raise OSError("[WinError 10038] An operation was attempted on something that is not a socket")
+                yield r
+
+        self.state = state
+        self.messages = SimpleNamespace(batches=SimpleNamespace(retrieve=retrieve, results=stream))
+
+    def close(self):
+        self.state["closed"] = True
+
+    __del__ = close
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def test_cli_ingest_keeps_the_client_open_while_streaming(engine, tmp_path, monkeypatch):
+    from argparse import Namespace
+    from sqlalchemy import update
+    from vehicle_scraper.catalog import build, cli
+
+    prep = prepare(engine, build_catalog(engine, RAW, MAKES).resolution, tmp_path / "ai")
+    with engine.begin() as c:
+        c.execute(update(S.ai_run).values(batch_id="msgbatch_test", status="submitted"))
+    models, _ = _ids(prep.requests[0])
+    results = [_result("honda-0", {"models": [_model(models["CRV"], "rename", "CR-V")], "trims": []})]
+    state = {"closed": False}
+    monkeypatch.setattr(cli, "_client", lambda: _StreamingClient(results, state))
+    monkeypatch.setattr(build, "load_raw_rows", lambda path: RAW)
+    raw_db = tmp_path / "vehicles.sqlite"
+    raw_db.touch()
+    args = Namespace(catalog_cmd="ai-ingest", db=str(engine.url), raw_db=str(raw_db), run=None)
+    assert cli.run(args) == 0 and state["closed"]                               # closed only at the end
+    with engine.connect() as c:
+        assert c.execute(select(S.ai_run.c.status)).scalar() == "ingested"
+        assert "CR-V" in set(c.execute(select(S.model.c.name)).scalars())
+
+
 def test_review_round_trip(engine, tmp_path):
     rep = build_catalog(engine, RAW, MAKES)
     prep = prepare(engine, rep.resolution, tmp_path / "ai")
