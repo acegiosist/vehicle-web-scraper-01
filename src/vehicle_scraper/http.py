@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import random
 import time
-import urllib.robotparser
 from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -13,6 +12,7 @@ import requests
 
 from .config import Settings, settings as default_settings
 from .extract import detect_block
+from .robots import RobotsRules
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class PoliteClient:
             **(extra_headers or {}),
         })
         self._last_hit: dict[str, float] = {}
-        self._robots: dict[str, Optional[urllib.robotparser.RobotFileParser]] = {}
+        self._robots: dict[str, Optional[RobotsRules]] = {}
         self._browser = None
         self.robots_exempt: set[str] = set()     # hosts of official, authenticated APIs
 
@@ -58,20 +58,18 @@ class PoliteClient:
             return True
         base = f"{p.scheme}://{p.netloc}"
         if base not in self._robots:
-            rp = urllib.robotparser.RobotFileParser()
             try:
                 r = self.session.get(f"{base}/robots.txt", timeout=self.cfg.timeout_s)
-                rp.parse(r.text.splitlines() if r.status_code == 200 else [])
-                self._robots[base] = rp
+                self._robots[base] = RobotsRules(r.text if r.status_code == 200 else "", self.cfg.user_agent)
             except requests.RequestException:
                 self._robots[base] = None          # unreachable robots.txt -> allow
         rp = self._robots[base]
-        return True if rp is None else rp.can_fetch(self.cfg.user_agent, url)
+        return True if rp is None else rp.can_fetch(url)
 
     def crawl_delay(self, url: str) -> float:
         p = urlparse(url)
         rp = self._robots.get(f"{p.scheme}://{p.netloc}")
-        d = rp.crawl_delay(self.cfg.user_agent) if rp else None
+        d = rp.crawl_delay if rp else None
         return max(float(d or 0), self.cfg.request_delay_s)
 
     def _throttle(self, url: str) -> None:
