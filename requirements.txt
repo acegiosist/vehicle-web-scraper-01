@@ -5,5 +5,10 @@ pydantic>=2.5
 python-dotenv>=1.0
 PyYAML>=6.0
 pytest>=8.0
+sqlalchemy>=2.0            # catalog (knowledge base); its tests run on SQLite
 # Optional, for JavaScript-rendered sites (USE_BROWSER=true):
 # playwright>=1.40
+# Optional, catalog on PostgreSQL (CATALOG_DATABASE_URL=postgresql+psycopg://...):
+# psycopg[binary]>=3.1
+# Optional, catalog AI step (catalog ai-prepare / ai-submit / ai-ingest):
+# anthropic>=2.10,<3

@@ -32,7 +32,18 @@ PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
 PYTHONPATH=src python -m vehicle_scraper export --format xlsx   # stdlib-only writer in xlsx.py
 PYTHONPATH=src python -m vehicle_scraper coverage
 PYTHONPATH=src python -m vehicle_scraper new-site <url> [--name --country --currency --browser --force --dry-run]
+
+# catalog / knowledge base (needs sqlalchemy; the AI subcommands need anthropic + ANTHROPIC_API_KEY)
+PYTHONPATH=src python -m vehicle_scraper catalog build                    # rules only, free
+PYTHONPATH=src python -m vehicle_scraper catalog export-ddl --out schema.sql
+PYTHONPATH=src python -m vehicle_scraper catalog ai-prepare [--make toyota] [--max-requests 2] [--estimate]
+PYTHONPATH=src python -m vehicle_scraper catalog ai-submit --yes          # spends API credit: ask the user first
+PYTHONPATH=src python -m vehicle_scraper catalog ai-status | ai-ingest
+PYTHONPATH=src python -m vehicle_scraper catalog review --export data/review.xlsx | --import data/review.xlsx
 ```
+
+On this machine pytest's default temp dir is not writable: run `python -m pytest --basetemp=<writable dir>`.
+pip can't verify PyPI's certificate here (HTTPS inspection); `uv pip install --native-tls --python .venv/Scripts/python.exe ...` works.
 
 There is no lint/format command configured in this repo.
 
@@ -48,6 +59,18 @@ UTC), not on `model_year`. `discover()` sets it when known up front — CarroYa'
 the sitemap `<lastmod>` via `SiteScraper.sitemap_entries` — so old listings are skipped without
 fetching; `parse()` may overwrite it (TrueCar's page `listedAt`). Listings with no date at all
 aren't saved under `--max-age`, and `--limit` then counts only listings that pass.
+
+**Catalog (`catalog/`)** reads `vehicles.sqlite` read-only and builds a relational knowledge base
+(`schema.py`, SQLAlchemy Core: PostgreSQL via `CATALOG_DATABASE_URL`, else `data/catalog.sqlite`).
+Stages: `canonical.py` (rules: make seed `config/catalog/makes.yaml`, `model_key` merges spellings,
+`clean_trim` moves spec/equipment tokens into attrs) → `build.py` (`resolve()` is pure; `write()`
+upserts by natural key so IDs are stable, replaces derived tables, prunes rule-created entities
+without listings) → `ai_batch.py` (only unsettled items, memoized by `ai_decision.input_hash`
+including `ai_prompt.PROMPT_VERSION`; bump it when the prompt or schema changes) → `validate.py`
+(auto-accept only confident, evidence-consistent answers; `ai_knowledge` values always go to
+`review_item`). AI/human decisions persist as `model_alias` / `trim_alias` and `name_locked`, which
+`build` re-applies on every rebuild. Keep `ai_prompt.SYSTEM_PROMPT` free of anything variable so the
+cached prefix stays byte-identical.
 
 **Two ways a site is implemented**, both registered in a shared `REGISTRY` (`sites/base.py`):
 - A **dedicated scraper** (`sites/carroya.py`, `cofino.py`, `tucarro.py`, `chileautos.py`,

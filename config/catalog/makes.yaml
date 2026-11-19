@@ -1,0 +1,87 @@
+# Canonical makes for the catalog (catalog/canonical.py).
+#
+#   <Canonical name>: {country: <country of origin>, aliases: [other spellings]}
+#
+# Matching ignores case, accents, spaces and punctuation, so "AUDI", "Audi" and "audi"
+# need no alias; list only spellings that differ after that ("Landrover", "VW", "Mini Cooper").
+# A make found in listings but missing here is still catalogued, but flagged for AI/human review.
+# `class: heavy` marks makes that only build trucks/buses (other makes get their class per listing).
+
+Acura: {country: Japan}
+AKT: {country: Colombia}
+Audi: {country: Germany}
+Bajaj: {country: India}
+Benelli: {country: Italy}
+BMW: {country: Germany}
+Brilliance: {country: China}
+BYD: {country: China}
+Cadillac: {country: United States}
+CFMoto: {country: China, aliases: [CF MOTO, CF-Moto]}
+Chana: {country: China}
+Changan: {country: China}
+Chery: {country: China}
+Chevrolet: {country: United States, aliases: [Chevy, GM Chevrolet]}
+Citroën: {country: France, aliases: [Citroen]}
+Dadao: {country: China}
+Daihatsu: {country: Japan}
+Datsun: {country: Japan}
+DFSK: {country: China, aliases: [Dongfeng Sokon]}
+Dodge: {country: United States}
+Dongfeng: {country: China}
+DS: {country: France, aliases: [DS Automobiles]}
+FAW: {country: China, aliases: [FAW Bestune, Bestune]}
+Fiat: {country: Italy}
+Ford: {country: United States}
+Foton: {country: China}
+GAC: {country: China}
+Great Wall: {country: China, aliases: [GWM]}
+Hero: {country: India, aliases: [Hero MotoCorp]}
+Honda: {country: Japan}
+Hyundai: {country: South Korea}
+Isuzu: {country: Japan}
+Iveco: {country: Italy, class: heavy}
+JAC: {country: China}
+Jaguar: {country: United Kingdom}
+Jeep: {country: United States}
+Jetour: {country: China}
+Karry: {country: China}
+Kawasaki: {country: Japan}
+Kia: {country: South Korea}
+KTM: {country: Austria}
+Kymco: {country: Taiwan}
+Lada: {country: Russia}
+Land Rover: {country: United Kingdom, aliases: [Landrover]}
+Leapmotor: {country: China}
+Lexus: {country: Japan}
+Mahindra: {country: India}
+Maruti Suzuki: {country: India, aliases: [Maruti]}
+Maxus: {country: China}
+Mazda: {country: Japan}
+Mercedes-Benz: {country: Germany, aliases: [Mercedes Benz, Mercedes]}
+MG: {country: China, aliases: [MG Motor]}
+Mini: {country: United Kingdom, aliases: [Mini Cooper]}
+Mitsubishi: {country: Japan}
+Nissan: {country: Japan}
+Peugeot: {country: France}
+Plymouth: {country: United States}
+Porsche: {country: Germany}
+RAM: {country: United States}
+Renault: {country: France}
+Royal Enfield: {country: India}
+SEAT: {country: Spain}
+Sinotruk: {country: China, class: heavy}
+Škoda: {country: Czech Republic, aliases: [Skoda]}
+SsangYong: {country: South Korea, aliases: [KGM, KG Mobility]}
+Subaru: {country: Japan}
+Suzuki: {country: Japan}
+SYM: {country: Taiwan}
+Tata: {country: India, aliases: [Tata Motors]}
+Tesla: {country: United States}
+Toyota: {country: Japan}
+TVS: {country: India}
+Vespa: {country: Italy}
+Victory: {country: Colombia}
+Volkswagen: {country: Germany, aliases: [VW]}
+Volvo: {country: Sweden}
+Yamaha: {country: Japan}
+Zotye: {country: China}

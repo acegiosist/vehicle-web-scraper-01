@@ -45,7 +45,7 @@ FEATURE_FIELDS = [
 ]
 SCHEMA_FIELDS = IDENTITY_FIELDS + TECH_FIELDS + FEATURE_FIELDS
 LISTING_FIELDS = ["price", "currency", "mileage_km"]
-META_FIELDS = ["source_site", "source_url", "listing_id", "scraped_at", "parse_warnings"]
+META_FIELDS = ["source_site", "source_url", "listing_id", "listed_at", "scraped_at", "parse_warnings"]
 ALL_FIELDS = META_FIELDS[:3] + LISTING_FIELDS + SCHEMA_FIELDS + META_FIELDS[3:]
 
 BOOLEAN_FIELDS = [f for f in FEATURE_FIELDS if f not in ("airbags_count", "screen_size_in")]
@@ -56,6 +56,7 @@ class VehicleRecord(BaseModel):
     source_site: str
     source_url: str
     listing_id: str
+    listed_at: Optional[datetime] = None      # when the listing was posted (UTC), if the site says
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     parse_warnings: list[str] = Field(default_factory=list)
 
@@ -141,5 +142,6 @@ class VehicleRecord(BaseModel):
         data = self.model_dump()
         row = {k: data.get(k) for k in ALL_FIELDS}
         row["scraped_at"] = self.scraped_at.isoformat()
+        row["listed_at"] = self.listed_at.isoformat() if self.listed_at else None
         row["parse_warnings"] = " | ".join(self.parse_warnings)
         return row

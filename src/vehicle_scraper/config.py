@@ -31,11 +31,18 @@ class Settings:
     # Mercado Libre (TuCarro) official API
     ml_access_token: str = os.getenv("ML_ACCESS_TOKEN", "")
     ml_site_id: str = os.getenv("ML_SITE_ID", "MCO")           # MCO = Colombia, MLV = Venezuela
+    # Catalog / knowledge base (vehicle_scraper.catalog): PostgreSQL in production,
+    # e.g. postgresql+psycopg://user:pass@host/db; empty = SQLite file next to the raw data.
+    catalog_database_url: str = os.getenv("CATALOG_DATABASE_URL", "")
     extra: dict = field(default_factory=dict)
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "vehicles.sqlite"
+
+    @property
+    def catalog_url(self) -> str:
+        return self.catalog_database_url or f"sqlite:///{(self.data_dir / 'catalog.sqlite').as_posix()}"
 
 
 settings = Settings()

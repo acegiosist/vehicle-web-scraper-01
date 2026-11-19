@@ -165,3 +165,13 @@ def test_carroya_discover_reads_publication_date(cfg, tmp_path):
     got = list(CarroYaScraper(cfg, client=FakeClient({"find-filters": str(p)})).discover())
     assert [l.listed_at for l in got] == [to_datetime("2026-11-14T20:40:46Z"),
                                           to_datetime("2026-01-02"), None]
+
+
+def test_listing_date_is_stored(dated, tmp_path):
+    cli.run_site("dated", dated, limit=None, refresh=False)
+    rows = {r["listing_id"]: r for r in dated.rows()}
+    assert to_datetime(rows["a"]["listed_at"]) == _ago(10)
+    assert to_datetime(rows["p"]["listed_at"]) == _ago(3000)   # date found on the page by parse()
+    assert rows["n"]["listed_at"] is None
+    dated.export_csv(tmp_path / "out.csv")
+    assert "listed_at" in (tmp_path / "out.csv").read_text(encoding="utf-8-sig").splitlines()[0]

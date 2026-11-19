@@ -18,7 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40"]
-dev = ["pytest>=8.0"]
+catalog = ["sqlalchemy>=2.0", "psycopg[binary]>=3.1"]   # catalog / knowledge base (PostgreSQL)
+ai = ["anthropic>=2.10,<3"]                              # catalog AI step (Message Batches API)
+dev = ["pytest>=8.0", "sqlalchemy>=2.0"]
 
 [project.scripts]
 vehicle-scraper = "vehicle_scraper.cli:main"

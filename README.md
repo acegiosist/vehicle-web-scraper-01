@@ -141,6 +141,40 @@ in `sites/__init__.py`. `cofino.py` (≈50 lines) and `carroya.py` are good temp
 Workflow for a new site: run it with `--limit 5 -v`, then check `coverage.csv` and the
 `parse_warnings` column. Set `SAVE_RAW=true` to keep the parsed records for debugging.
 
+## Catalog (knowledge base)
+
+`catalog` turns the scraped listings into a relational catalog for a marketplace:
+make → model → trim → variant (year, fuel, gearbox, engine size) with consensus specs,
+equipment counts, markets and per-field provenance. The raw `vehicles.sqlite` is only read.
+
+```bash
+pip install -e ".[catalog,ai]"                                  # SQLAlchemy, psycopg, anthropic
+PYTHONPATH=src python -m vehicle_scraper catalog build          # rules only, free
+PYTHONPATH=src python -m vehicle_scraper catalog export-ddl --out schema.sql   # PostgreSQL DDL
+PYTHONPATH=src python -m vehicle_scraper catalog ai-prepare --estimate          # what rules couldn't settle
+PYTHONPATH=src python -m vehicle_scraper catalog ai-submit --yes               # spends API credit
+PYTHONPATH=src python -m vehicle_scraper catalog ai-status
+PYTHONPATH=src python -m vehicle_scraper catalog ai-ingest                     # validate, apply, rebuild
+PYTHONPATH=src python -m vehicle_scraper catalog review --export data/review.xlsx
+PYTHONPATH=src python -m vehicle_scraper catalog review --import data/review.xlsx
+```
+
+The database is `CATALOG_DATABASE_URL` (PostgreSQL in production), or `data/catalog.sqlite`.
+
+1. **Rules** (`catalog/canonical.py`, `catalog/build.py`) merge spellings (`RAV4` / `Rav 4` / `Rav4`,
+   `Clase C` / `C Class`), map makes through `config/catalog/makes.yaml`, move engine size, gearbox,
+   body, drivetrain and equipment words out of trim names (`1.6 Sedan Automatico` → specs), and split
+   models that carry their trim (`TAHOE LTZ 4X4` → Tahoe / LTZ / 4WD). Each spec of a variant is the
+   value most listings agree on; more than 30 % disagreement goes to review. IDs stay stable across
+   rebuilds.
+2. **AI step** (`catalog/ai_batch.py`, Claude Opus 5.5 through the Message Batches API) only sees what
+   rules could not settle: unverified models, official names, missing body styles and noisy trims.
+   It gets one compact TSV request per make, a cached system prompt and a JSON-schema answer, and
+   every decision is memoized, so a name is never sent twice.
+3. **Validation** (`catalog/validate.py`) accepts an answer automatically only when it is confident,
+   free of spec words and consistent with the listings. Anything else, and every value the model
+   took from its own knowledge, goes to the review queue (`catalog review`).
+
 ## Project layout
 
 ```
@@ -155,7 +189,9 @@ src/vehicle_scraper/
   cli.py         command line
   scaffold.py    `new-site`: probe a site from a URL and generate its scraper + test
   sites/         one module per site + generic YAML-driven scraper
+  catalog/       knowledge base: schema, rules, AI batch step, validation, review
 config/sites.yaml  extra sites without code
+config/catalog/makes.yaml  canonical makes and their aliases
 tests/           offline tests with fixtures captured from the real sites
 ```
 
