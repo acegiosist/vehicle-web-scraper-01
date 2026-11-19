@@ -68,6 +68,8 @@ def run(args: argparse.Namespace) -> int:
             print(sql)
         return 0
 
+    S.create_all(engine)       # adds tables a newer version introduced (e.g. variant_override); keeps data
+
     if cmd in ("build", "ai-prepare", "ai-ingest") and not Path(raw_db).exists():
         print(f"No scraper database at {raw_db}: run the scraper first.", file=sys.stderr)
         return 1

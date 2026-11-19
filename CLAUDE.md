@@ -68,8 +68,10 @@ upserts by natural key so IDs are stable, replaces derived tables, prunes rule-c
 without listings) → `ai_batch.py` (only unsettled items, memoized by `ai_decision.input_hash`
 including `ai_prompt.PROMPT_VERSION`; bump it when the prompt or schema changes) → `validate.py`
 (auto-accept only confident, evidence-consistent answers; `ai_knowledge` values always go to
-`review_item`). AI/human decisions persist as `model_alias` / `trim_alias` and `name_locked`, which
-`build` re-applies on every rebuild. Keep `ai_prompt.SYSTEM_PROMPT` free of anything variable so the
+`review_item`). AI/human decisions persist as `model_alias` / `trim_alias`, `name_locked` and
+`variant_override` (human spec values from `review`, applied over the consensus), which `build`
+re-applies on every rebuild. On SQLite, `schema.get_engine` makes SQLAlchemy emit `BEGIN` itself so
+the per-row savepoints in `review --import` work. Keep `ai_prompt.SYSTEM_PROMPT` free of anything variable so the
 cached prefix stays byte-identical.
 
 **Two ways a site is implemented**, both registered in a shared `REGISTRY` (`sites/base.py`):

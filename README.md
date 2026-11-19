@@ -175,6 +175,21 @@ The database is `CATALOG_DATABASE_URL` (PostgreSQL in production), or `data/cata
    free of spec words and consistent with the listings. Anything else, and every value the model
    took from its own knowledge, goes to the review queue (`catalog review`).
 
+**Review queue.** `review --export` writes one row per open item. Fill `decision` with `approve`,
+`reject` or `correct` (Spanish works too: `aprobar`, `rechazar`, `corregir`) and import the file;
+empty or failing rows stay open. A `correct` row takes a short value in `correction`:
+
+| reason | correction | effect |
+|---|---|---|
+| `ai_knowledge_body` | `SUV` | model's default body style |
+| `ai_model` | `merge: Cerato` · `rename: Cerato Forte` · `keep` | join an existing model, set the name, or lock the current one |
+| `ai_trim` | `Attraction` | trim name |
+| `spec_conflict` | `drivetrain=AWD, doors=4` | human override of the listing consensus (`variant_override`) |
+
+Approving a `not_a_model` answer is refused (it would change nothing): correct it with `merge:`/`rename:`
+or reject it. Decisions persist in `model_alias`, `trim_alias`, `name_locked` and `variant_override`,
+so every rebuild keeps them.
+
 ## Project layout
 
 ```

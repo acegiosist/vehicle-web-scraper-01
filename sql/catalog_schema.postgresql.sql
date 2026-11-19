@@ -236,3 +236,14 @@ CREATE TABLE variant_market (
 	CONSTRAINT pk_variant_market PRIMARY KEY (variant_id, country), 
 	CONSTRAINT fk_variant_market_variant_id FOREIGN KEY(variant_id) REFERENCES variant (id) ON DELETE CASCADE
 );
+
+CREATE TABLE variant_override (
+	variant_id INTEGER NOT NULL, 
+	field VARCHAR(40) NOT NULL, 
+	value JSONB NOT NULL, 
+	decided_by VARCHAR(80), 
+	decided_at TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_variant_override PRIMARY KEY (variant_id, field), 
+	CONSTRAINT ck_variant_override_field CHECK (field IN ('body_style', 'drivetrain', 'engine_cylinders', 'horsepower_hp', 'doors', 'seats', 'fuel_tank_capacity_l', 'cargo_capacity_l', 'wheel_size_in', 'tire_size', 'fuel_economy_kml', 'ev_range_km', 'ev_charging_speed_kw', 'airbags_count', 'screen_size_in', 'country_of_manufacture')), 
+	CONSTRAINT fk_variant_override_variant_id FOREIGN KEY(variant_id) REFERENCES variant (id) ON DELETE CASCADE
+);

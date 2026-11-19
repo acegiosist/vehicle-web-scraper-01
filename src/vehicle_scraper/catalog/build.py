@@ -384,7 +384,7 @@ class BuildReport:
             f"Variants:       {self.variants}  (trim + year + fuel + gearbox + engine size)",
             f"Listings linked:{self.listings_linked:>6}",
             f"Classes:        " + ", ".join(f"{k} {v}" for k, v in sorted(self.by_class.items())),
-            f"Open review items (rules): {self.review_items}",
+            f"Open review items: {self.review_items}  (rules + AI, see `catalog review --export`)",
             f"Pruned (no listings left): " + (", ".join(f"{k} {v}" for k, v in self.pruned.items() if v) or "none"),
         ])
 
@@ -422,12 +422,25 @@ def write(engine: Engine, res: Resolution) -> BuildReport:
                 conn, S.trim, {"model_id": model_ids[(slug, mkey)], "match_key": tkey},
                 {"name": name, "slug": slugify(name) if name else "_none"}, keep_if_locked=("name", "slug"))
 
+        human: dict = defaultdict(dict)        # (trim_id, variant_key) -> {field: value}, set in review
+        for trim_id, vk, f, v in conn.execute(
+                select(S.variant.c.trim_id, S.variant.c.variant_key, S.variant_override.c.field,
+                       S.variant_override.c.value).join(S.variant, S.variant.c.id == S.variant_override.c.variant_id)):
+            human[(trim_id, vk)][f] = v
+
         variant_ids, fs_rows, vf_rows, vm_rows, li_rows, reviews = {}, [], [], [], [], []
         for (tkey, vk), agg in aggs.items():
             cons = agg.consensus()
+            fixed = human.get((trim_ids[tkey], vk), {})
+            for f, v in fixed.items():          # a person's value beats the listing consensus
+                seen = agg.fields.get(f, Counter())
+                support = sum(n for (val, _), n in seen.items() if val == v)
+                cons[f] = {"value": v, "source": "human", "n_support": support,
+                           "n_conflict": sum(seen.values()) - support,
+                           "confidence": 1.0}
             values = {f: (cons[f]["value"] if f in cons else None) for f in (*KEY_FIELDS, *SPEC_FIELDS)}
             conflicts = {f: c for f, c in cons.items()
-                         if c["n_support"] + c["n_conflict"] >= CONFLICT_MIN_LISTINGS
+                         if f not in fixed and c["n_support"] + c["n_conflict"] >= CONFLICT_MIN_LISTINGS
                          and c["n_conflict"] / (c["n_support"] + c["n_conflict"]) > CONFLICT_REVIEW_RATIO}
             vid = _upsert(conn, S.variant, {"trim_id": trim_ids[tkey], "variant_key": vk},
                           {**values, "n_listings": len(agg.listings), "needs_review": bool(conflicts)})

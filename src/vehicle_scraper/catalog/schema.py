@@ -1,6 +1,6 @@
 """Relational schema of the vehicle catalog (knowledge base).
 
-    make ─< model ─< trim ─< variant ─< variant_market / variant_feature / variant_field_source
+    make ─< model ─< trim ─< variant ─< variant_market / variant_feature / variant_field_source / variant_override
                                   └─< listing (marketplace evidence, no personal data)
 
 Defined with SQLAlchemy Core so one definition serves PostgreSQL (production: JSONB) and SQLite
@@ -201,6 +201,20 @@ variant_field_source = Table(
     _in("source", SOURCES, nullable=False),
 )
 
+# A person's value for a spec, set from the review queue. `build` applies it over the listing consensus on
+# every rebuild (source "human"). Key fields (year, fuel, gearbox, engine size) can't be overridden: they
+# define the variant itself.
+variant_override = Table(
+    "variant_override", metadata,
+    Column("variant_id", Integer, ForeignKey("variant.id", ondelete="CASCADE"), nullable=False),
+    Column("field", String(40), nullable=False),
+    Column("value", JSONType, nullable=False),
+    Column("decided_by", String(80)),
+    Column("decided_at", TS),
+    PrimaryKeyConstraint("variant_id", "field"),
+    _in("field", SPEC_COLUMNS, nullable=False),
+)
+
 listing = Table(
     "listing", metadata,
     Column("source_site", String(40), nullable=False),
@@ -280,6 +294,13 @@ def get_engine(url: str) -> Engine:
         @event.listens_for(engine, "connect")
         def _fk_on(dbapi_conn, _):                         # SQLite enforces FKs only when asked
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
+            # pysqlite opens transactions on its own and breaks SAVEPOINT (a RELEASE can commit
+            # everything): let SQLAlchemy emit BEGIN itself, as its SQLite docs recommend.
+            dbapi_conn.isolation_level = None
+
+        @event.listens_for(engine, "begin")
+        def _begin(conn):
+            conn.exec_driver_sql("BEGIN")
     return engine
 
 

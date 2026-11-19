@@ -185,6 +185,113 @@ def test_cli_ingest_keeps_the_client_open_while_streaming(engine, tmp_path, monk
         assert "CR-V" in set(c.execute(select(S.model.c.name)).scalars())
 
 
+def _decide(engine, tmp_path, decisions: dict, reviewer="ana"):
+    """Export the queue to csv, fill decision/correction by (reason, entity_key) and import it."""
+    path = tmp_path / "queue.csv"
+    export_review(engine, path)
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        for r in rows:
+            d, c = decisions.get((r["reason"], r["entity_key"]), ("", ""))
+            w.writerow(r | {"decision": d, "correction": c})
+    return import_review(engine, path, reviewer=reviewer)
+
+
+def _open(engine):
+    with engine.connect() as c:
+        return {(r.reason, r.entity_key) for r in c.execute(select(S.review_item).where(S.review_item.c.status == "open"))}
+
+
+def test_review_short_corrections(engine, tmp_path):
+    rep = build_catalog(engine, RAW, MAKES)
+    prep = prepare(engine, rep.resolution, tmp_path / "ai")
+    models, trims = _ids(prep.requests[0])
+    t_id, t_model = trims["Pilot"]
+    ingest(engine, [_result("honda-0", {"models": [
+        _model(models["Pilot"], "keep", "Pilot", body="Minivan", src="ai_knowledge"),
+        _model(models["Odyssey"], "keep", "Odyssey", conf=0.5),
+        _model(models["NEW HR-V"], "not_a_model", "NEW HR-V", conf=0.5),
+    ], "trims": [
+        {"id": t_id, "model_id": t_model, "trim_name": "Touring Edition", "engine_displacement_l": None,
+         "transmission_type": None, "fuel_type": None, "drivetrain": None, "body_style": None, "doors": None,
+         "confidence": 0.6, "note": ""}]})], prep.run_id)
+    queue = _open(engine)
+    assert {("ai_knowledge_body", "honda/pilot"), ("ai_model", "honda/odyssey"),
+            ("ai_model", "honda/newhrv")} <= queue
+    trim_key = next(k for r, k in queue if r == "ai_trim")
+
+    out = _decide(engine, tmp_path, {
+        ("ai_knowledge_body", "honda/pilot"): ("correct", "spaceship"),      # not a body style
+        ("ai_model", "honda/newhrv"): ("approve", ""),                       # not_a_model: approving does nothing
+        ("ai_model", "honda/odyssey"): ("correct", "merge: Civic"),          # no such model
+    })
+    assert out["approved"] == out["corrected"] == 0 and len(out["errors"]) == 3
+    assert any("body_style must be one of" in e for e in out["errors"])
+    assert any("not a model" in e for e in out["errors"]) and any("no model 'Civic'" in e for e in out["errors"])
+    assert queue == _open(engine)                                            # failed rows stay open
+
+    out = _decide(engine, tmp_path, {
+        ("ai_knowledge_body", "honda/pilot"): ("corregir", "suv"),
+        ("ai_model", "honda/newhrv"): ("correct", "merge: HR-V"),
+        ("ai_model", "honda/odyssey"): ("correct", "rename: Odyssey Touring"),
+        ("ai_trim", trim_key): ("correct", "Touring Black Edition"),
+    })
+    assert out["corrected"] == 4 and not out["errors"]
+    build_catalog(engine, RAW, MAKES)
+    with engine.connect() as c:
+        names = {n: body for n, body in c.execute(select(S.model.c.name, S.model.c.default_body_style))}
+        trim_names = set(c.execute(select(S.trim.c.name)).scalars())
+    assert names["Pilot"] == "SUV" and "Odyssey Touring" in names and "NEW HR-V" not in names
+    assert "Touring Black Edition" in trim_names
+
+
+def test_spec_conflict_correction_is_a_lasting_override(engine, tmp_path):
+    raw = [row("carroya", f"c{i}", "CR-V", "EXL", drivetrain=d, engine_displacement_l=2.4)
+           for i, d in enumerate(["4WD", "4WD", "AWD"])]
+    build_catalog(engine, raw, MAKES)
+    (conflict,) = [k for r, k in _open(engine) if r == "spec_conflict"]
+    out = _decide(engine, tmp_path, {("spec_conflict", conflict): ("correct", "model_year=2021")})
+    assert "can't be overridden" in out["errors"][0]
+    out = _decide(engine, tmp_path, {("spec_conflict", conflict): ("correct", "drivetrain=awd, doors=5")})
+    assert out["corrected"] == 1 and not out["errors"]
+    for _ in range(2):                                                        # survives rebuilds
+        build_catalog(engine, raw, MAKES)
+        with engine.connect() as c:
+            v = c.execute(select(S.variant)).mappings().one()
+            src = dict(c.execute(select(S.variant_field_source.c.field, S.variant_field_source.c.source)
+                                 .where(S.variant_field_source.c.variant_id == v["id"])).all())
+        assert (v["drivetrain"], v["doors"], v["needs_review"]) == ("AWD", 5, False)
+        assert src["drivetrain"] == src["doors"] == "human"
+        assert not any(r == "spec_conflict" for r, _ in _open(engine))
+
+
+def test_review_import_is_all_or_nothing_on_a_crash(engine, tmp_path, monkeypatch):
+    """Per-row savepoints must not commit early: an unexpected error rolls back the whole import
+    (pysqlite's own transaction handling used to let a RELEASE commit the rows before it)."""
+    from vehicle_scraper.catalog import review
+    raw = [row("carroya", f"c{i}", "CR-V", "EXL", drivetrain=d, engine_displacement_l=2.4)
+           for i, d in enumerate(["4WD", "4WD", "AWD"])] + [row("cofino", "g9", "Pilot", None)]
+    rep = build_catalog(engine, raw, MAKES)
+    prep = prepare(engine, rep.resolution, tmp_path / "ai")
+    models, _ = _ids(prep.requests[0])
+    ingest(engine, [_result("honda-0", {"models": [_model(models["Pilot"], "keep", "Pilot", body="SUV",
+                                                         src="ai_knowledge")], "trims": []})], prep.run_id)
+    (conflict,) = [k for r, k in _open(engine) if r == "spec_conflict"]
+
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(review, "_override_variant", boom)
+    with pytest.raises(RuntimeError):
+        _decide(engine, tmp_path, {("ai_knowledge_body", "honda/pilot"): ("approve", ""),    # exported first
+                                   ("spec_conflict", conflict): ("correct", "drivetrain=AWD")})
+    with engine.connect() as c:
+        assert c.execute(select(S.model.c.default_body_style).where(S.model.c.name == "Pilot")).scalar() is None
+    assert ("ai_knowledge_body", "honda/pilot") in _open(engine)
+
+
 def test_review_round_trip(engine, tmp_path):
     rep = build_catalog(engine, RAW, MAKES)
     prep = prepare(engine, rep.resolution, tmp_path / "ai")

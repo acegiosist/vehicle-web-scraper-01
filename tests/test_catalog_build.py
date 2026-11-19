@@ -110,7 +110,7 @@ def test_rebuild_is_idempotent_with_stable_ids(engine):
 
 def test_ddl_is_postgres():
     sql = S.ddl("postgresql")
-    assert sql.count("CREATE TABLE") == 15 and "JSONB" in sql and "SERIAL" in sql
+    assert sql.count("CREATE TABLE") == 16 and "JSONB" in sql and "SERIAL" in sql
     assert "CHECK (fuel_type IS NULL OR fuel_type IN ('Gasoline', 'Diesel', 'Hybrid', 'EV', 'CNG'))" in sql
 
 
