@@ -1,7 +1,8 @@
 r"""www.cars24.com — https://www.cars24.com
 
 Scaffolded by `vehicle_scraper new-site` on 2026-11-18 from https://www.cars24.com/
-* Discovery: sitemap https://www.cars24.com/sitemap.xml, detail URLs like /[a-z0-9-]+-\d+/?$ (768 seen while probing).
+* Discovery: sitemap https://www.cars24.com/sitemap.xml, detail URLs like /buy-used-<model>-<year>-cars-<city>-<id>/
+  (29,251 in the sitemap on 2026-11-19).
 * Detail page: JSON-LD Car: yes; embedded JSON specs: no; spec section: none found, reads the whole page.
 * Warning: country unknown from the domain; pass --country (ISO code)
 """
@@ -24,7 +25,9 @@ class Cars24Scraper(HtmlSiteScraper):
     notes = 'Scaffolded by new-site; review before marking verified'
 
     sitemap_url = 'https://www.cars24.com/sitemap.xml'
-    sitemap_pattern = r"/[a-z0-9-]+-\d+/?$"
+    # Only used-car detail pages. A looser /[a-z0-9-]+-\d+/ also matches ~2,360 news, article,
+    # new-car and RTO-registration pages in the sitemap.
+    sitemap_pattern = r"/buy-used-[a-z0-9-]+-\d+/?$"
     id_pattern = r"-(\d+)/?$"
 
     def parse(self, listing: Listing) -> VehicleRecord:

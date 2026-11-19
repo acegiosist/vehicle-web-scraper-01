@@ -1,5 +1,7 @@
 """Snapshot of what the cars24 scraper extracted from its sample page when it was scaffolded
 (2026-11-18). After improving the parser, check the new values and update EXPECTED."""
+import re
+
 from vehicle_scraper.sites.base import Listing
 from vehicle_scraper.sites.cars24 import Cars24Scraper
 
@@ -33,3 +35,15 @@ def test_cars24_detail(cfg):
     got = {k: v for k, v in rec.model_dump(exclude={"scraped_at", "parse_warnings"}).items() if v is not None}
     assert got == EXPECTED
     assert rec.parse_warnings == []
+
+
+def test_cars24_sitemap_pattern_keeps_only_used_car_pages():
+    pat = re.compile(Cars24Scraper.sitemap_pattern)
+    cars = [URL, "https://www.cars24.com/buy-used-honda-amaze-2013-cars-north-24-parganas-28626317192/"]
+    others = [
+        "https://www.cars24.com/article/best-selling-used-car-brands-in-india-in-2024/",
+        "https://www.cars24.com/news/tata-nexon-ev-launch-2025/",
+        "https://www.cars24.com/rto-vehicle-registration-details-west-bengal-wb-98/",
+    ]
+    assert all(pat.search(u) for u in cars)
+    assert not any(pat.search(u) for u in others)
