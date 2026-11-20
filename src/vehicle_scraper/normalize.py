@@ -105,7 +105,9 @@ KW_TO_HP = 1.34102
 PS_TO_HP = 0.98632
 
 
-_ENGINE_LAYOUT_RE = re.compile(r"\b[vlhiw]-?\d{1,2}\b|(?<![\d.,])\d{1,2} ?(v|cilindros|valvulas|cylinders|valves)\b")
+# Cylinder, valve and stroke counts: "V6", "16V", "4 cilindros", "1 cilindro", "4 tiempos", "4-stroke".
+_ENGINE_LAYOUT_RE = re.compile(r"\b[vlhiw]-?\d{1,2}\b"
+                               r"|(?<![\d.,])\d{1,2} ?-?(v|cilindros?|valvulas|cylinders?|valves|tiempos|strokes?)\b")
 
 
 _LITRES_RE = re.compile(r"(?<![\d.,])(\d{1,2}(?:[.,]\d{1,3})?)\s?(?:l|lts?|litros?|liters?|litres?)\b")

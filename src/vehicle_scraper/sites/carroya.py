@@ -28,6 +28,33 @@ def _slug(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", "-", strip_accents(str(value)).lower()).strip("-")
 
 
+def _is_displacement_feature(feature: dict) -> bool:
+    return str(feature.get("name", "")).strip().lower() == "engine displacement"
+
+
+def _cylindrical_l(value: object, moto: bool) -> Optional[float]:
+    """Litres from the seller-typed ``cylindrical`` field, or None.
+
+    Car listings mix tenths of a litre (16 -> 1.6 L) and cc (2000 -> 2.0 L); motorcycles
+    always give cc (125, 292, 411). Anything else is rejected, not guessed:
+    * 1-4 are whole litres rounded by the seller (a 1.8 L Tracker says 2, a 7.2 L truck
+      says 4, a 1254 cc BMW R1250 says 4);
+    * 10000+ are cc with an extra digit on cars (1.6 L Sonic: 16000) but real cc on
+      heavy trucks (10800 on a Kenworth), so the number alone can't tell which.
+    """
+    try:
+        n = float(str(value).strip())
+    except ValueError:
+        return None
+    if moto:
+        return round(n / 1000, 3) if 50 <= n <= 2500 else None
+    if 5 <= n <= 100:
+        return round(n / 10, 1)
+    if 500 <= n <= 10000:
+        return round(n / 1000, 1)
+    return None
+
+
 @register
 class CarroYaScraper(SiteScraper):
     name = "carroya"
@@ -86,23 +113,19 @@ class CarroYaScraper(SiteScraper):
         moto = d.get("category") == "Motos"
         if moto:
             b.set("vehicle_type", "Motorcycle")    # first: switches displacement/hp to moto ranges
-        # "cylindrical" mixes two formats across car listings: tenths of a litre
-        # (16 -> 1.6L) or actual cc (2000 -> 2.0L). Pick whichever lands the
-        # result in a plausible displacement range; neither guesses blindly.
-        # Motorcycles always give cc (125, 292, 411).
+        # "cylindrical" is typed by the seller and repeated in main-features as
+        # "Engine Displacement"; both are read only here (see _cylindrical_l).
         cyl = d.get("cylindrical")
-        if isinstance(cyl, (int, float)) and cyl > 0:
-            if moto:
-                if 50 <= cyl <= 2500:
-                    b.set("engine_displacement_l", cyl / 1000)
-                else:
-                    b.warn(f"could not parse engine_displacement_l from '{cyl}'")
-            elif 5 <= cyl <= 100:
-                b.set("engine_displacement_l", round(cyl / 10, 1))
-            elif 500 <= cyl <= 10000:
-                b.set("engine_displacement_l", round(cyl / 1000, 1))
-            else:
-                b.warn(f"could not parse engine_displacement_l from '{cyl}'")
+        if cyl in (None, "", "null"):
+            cyl = next((f.get("description") for f in d.get("main-features") or []
+                        if _is_displacement_feature(f)), None)
+        cyl_miss = None
+        if cyl not in (None, "", "null"):
+            litres = _cylindrical_l(cyl, moto)
+            if litres is not None:
+                b.set("engine_displacement_l", litres)
+            elif str(cyl).strip() not in ("0", "0.0"):    # 0 = not filled in
+                cyl_miss = str(cyl)
         b.set("transmission_type", d.get("box"))
         b.set("fuel_type", d.get("fuel"))
         b.set("mileage_km", d.get("kilometers"))
@@ -110,7 +133,8 @@ class CarroYaScraper(SiteScraper):
 
         # 2) main-features: [{"name": "Wheel drive", "description": "4x4"}, ...]
         for f in d.get("main-features") or []:
-            b.add_pair(f.get("name", ""), f.get("description"))
+            if not _is_displacement_feature(f):       # a copy of "cylindrical", handled above
+                b.add_pair(f.get("name", ""), f.get("description"))
 
         # 3) technical sheet: grouped specs with S/N booleans
         for group in d.get("technical_sheet") or []:
@@ -126,4 +150,8 @@ class CarroYaScraper(SiteScraper):
 
         # 6) seller comments (only adds clearly mentioned features)
         b.add_free_text(d.get("comments"))
+        # A junk "cylindrical" is only worth a warning when no other source gave the size
+        # (build() also drops it on EVs).
+        if cyl_miss is not None and "engine_displacement_l" not in b.values:
+            b.displacement_misses.append(cyl_miss)
         return self.finish(b.build())

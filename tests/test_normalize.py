@@ -122,6 +122,11 @@ def test_displacement_ignores_cylinder_and_valve_tokens():
     assert N.to_displacement_l("1.6 V") == 1.6
     assert N.to_displacement_l("L4 1.5") == 1.5
     assert N.to_displacement_l(2656, "cc") == 2.7
+    # Motorcycle "Motor" descriptions: the stroke/cylinder count is not 4.0 L (or 1.0 L).
+    assert N.to_displacement_l("4 TIEMPOS, MONOCILÍNDRICO", "Motor", moto=True) is None
+    assert N.to_displacement_l("4 tiempos, 1 cilindro enfriado por aire", "Motor", moto=True) is None
+    assert N.to_displacement_l("4-stroke single cylinder", "Engine", moto=True) is None
+    assert N.to_displacement_l("4 tiempos 124 cc", "Motor", moto=True) == 0.124
 
 
 def test_fuel_gas_and_mixed():
