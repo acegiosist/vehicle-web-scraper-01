@@ -32,7 +32,25 @@ PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
 PYTHONPATH=src python -m vehicle_scraper export --format xlsx   # stdlib-only writer in xlsx.py
 PYTHONPATH=src python -m vehicle_scraper coverage
 PYTHONPATH=src python -m vehicle_scraper new-site <url> [--name --country --currency --browser --force --dry-run]
+
+# knowledge base (PostgreSQL, optional extra: pip install -e .[kb]); URL from KB_DATABASE_URL
+alembic upgrade head                                   # or: ... kb migrate ; undo: alembic downgrade base
+PYTHONPATH=src python -m vehicle_scraper kb import --sqlite data/vehicles.sqlite
+PYTHONPATH=src python -m vehicle_scraper kb normalize && PYTHONPATH=src python -m vehicle_scraper kb consolidate
+PYTHONPATH=src python -m vehicle_scraper kb ai-identity --estimate     # --submit --confirm spends money
+PYTHONPATH=src python -m vehicle_scraper kb review export --out data/review.csv
+PYTHONPATH=src python -m vehicle_scraper kb status
+KB_TEST_DATABASE_URL=postgresql://kb:kbtest@localhost:55432/kb python -m pytest tests/test_kb_pg.py   # needs a Postgres
+PYTHONPATH=src python -m vehicle_scraper kb review worker            # applies decisions queued by the review site
+
+# review website (src/web, Next.js; needs src/web/.env.local with REVIEW_WEB_DATABASE_URL)
+cd src/web && pnpm install && pnpm dev                 # http://127.0.0.1:3000
+cd src/web && pnpm lint && pnpm typecheck && pnpm test # ESLint, tsc, Vitest (no database)
+cd src/web && KB_TEST_DATABASE_URL=postgresql://kb:kbtest@localhost:55432/kb pnpm test:e2e   # Playwright: real worker + prod build
+PYTHONPATH=src python -m vehicle_scraper kb fields-json # regenerate src/web/src/generated/kb-fields.json after models.py changes
 ```
+
+What each `kb` command does, with its flags: see "Knowledge base commands" below.
 
 There is no lint/format command configured in this repo.
 
@@ -123,6 +141,134 @@ label/feature synonyms go in `mapping.py`'s `LABEL_RULES`/`FEATURE_PATTERNS` wit
 in `tests/test_mapping.py`. Workflow: run the new site with `--limit 5 -v`, then check
 `data/coverage.csv` and the `parse_warnings` column; set `SAVE_RAW=true` to keep parsed JSON for
 debugging.
+
+**Knowledge base (`kb/`, PostgreSQL).** A second pipeline on top of the scraper's output:
+`importer.py` (vehicles.sqlite, opened read-only → `staging.raw_listing`, a new version only when
+`row_hash` changes) → `identity.py` (`kb normalize`: aliases by `compact_key`, seed
+`config/kb/makes.yaml`, `split_model`/`split_trim` strip attribute tokens, weak models/unknown makes
+become `review_item`s) → `consensus.py` (`kb consolidate`: variants, cross-portal clusters, listing
+evidence, cross-checks, publish to `variant_spec`/`variant_market_spec`) → `ai_batch.py` +
+`prompts.py` (Claude Opus 5.5 via Message Batches) → `review.py` (CSV round-trip, sampling).
+Invariants worth keeping:
+- Everything is idempotent and goes through alias tables + `UNIQUE` keys: re-running never
+  duplicates; listing-derived evidence is recomputed, AI/manual evidence is never touched by
+  `consolidate`.
+- Precedence `RANK` in consensus.py: manual > listing_consensus > listing_single > sibling > AI. A
+  manual value is never replaced; conflicting evidence opens `conflicts_with_human`.
+- Nothing from the AI is accepted without review; text from sites with `ai_allowed = false`
+  (Cofino) must never reach a prompt. `--submit` needs `--confirm` (it costs money).
+- Cross-checks flag (`pending_review` + review case), they never correct. A decided case
+  (`_decision`) is not asked again.
+- `fields.py` splits the schema (KEY/MECH/EQUIP); the migration freezes those column lists and
+  `tests/test_kb_migrations.py` fails when models.py changes without a new migration.
+- Prompts are byte-deterministic (sorted TSV, no dates) for prompt caching and `input_hash`
+  memoization; bump `PROMPT_VERSION` when changing them.
+- One writer at a time: every `kb` command except `status`/`export`/`golden`, and each cycle of
+  the review worker, takes `db.writer_lock` (a transaction-scoped advisory lock).
+- `review.decide_item` is the **only** path that applies a human decision (CSV import and the
+  worker both call it). A correction that doesn't fit its field raises `InvalidValue` and leaves
+  the case pending (`invalid_value`), it is never silently dropped.
+
+**Review website (`src/web`, Next.js 16 App Router + Kysely + Zod).** Human decisions on the
+web instead of the CSV. The site reads `kb.review_queue` (migration 0002: each case with a
+readable `entity_label`, make/model, `in_queue`) and only INSERTs into `kb.review_decision`,
+through the least-privilege role in `docs/sql/review_web_role.sql`. An AFTER INSERT trigger
+NOTIFYs `kb_review_decision`; `kb/worker.py` (`kb review worker`) applies each queued decision
+with `decide_item` in its own savepoint (`applied` / `failed` + error / `superseded`), closes
+sample batches, and after `--propagate-idle` quiet seconds runs normalize + consolidate.
+Things to keep in sync:
+- `src/web/src/lib/issues.ts` describes each `issue` and what approve/reject/correct do; it
+  mirrors `apply_decision`. A new issue or a new effect needs both.
+- `src/web/src/generated/kb-fields.json` comes from `kb fields-json` (`fields.fields_catalog`);
+  `tests/test_kb_fields_json.py` fails when it is stale. `src/web/src/generated/db.d.ts` comes
+  from `pnpm db:types` after a migration.
+- `kb.listing_number()` (SQL, sha256) and `identity.listing_number()` (Python) must agree.
+- Next.js 16 with Cache Components: request data (`searchParams`, `cookies`, `usePathname`) and
+  DB reads (`io()` in `lib/queries`) must sit inside `<Suspense>`. Read
+  `src/web/node_modules/next/dist/docs/` before changing Next code (see `src/web/AGENTS.md`).
+
+## Knowledge base commands (`vehicle-scraper kb ...`)
+
+Defined in `kb/cli.py`. `--database-url` goes **before** the subcommand (default
+`$KB_DATABASE_URL`). Every command except `migrate` runs in one transaction, so a failure
+leaves nothing half-done, and all of them are safe to re-run (invariants above). Commands,
+in pipeline order:
+
+- **`migrate [REVISION] [--downgrade]`**: wraps `alembic -x url=... upgrade|downgrade`
+  (default `head`). `--downgrade base` drops the `staging` and `kb` schemas. Revisions:
+  `0001_kb_schema`, `0002_review_web` (decision inbox, `review_queue` view).
+- **`import [--sqlite data/vehicles.sqlite]`**: copies listings into `staging.raw_listing`,
+  opening the file read-only.
+  - A file whose sha256 was already imported is skipped.
+  - A listing gets a new version only when its `row_hash` changes.
+  - A site not yet in `kb.source_site` is registered with `ai_allowed` and
+    `training_allowed` false. Review its terms, then UPDATE the row.
+- **`normalize`**: rule-based identity (make, model, trim, year), free.
+  - Resolves spellings through aliases (`compact_key`) and `config/kb/makes.yaml`.
+  - `split_model`/`split_trim` move attribute tokens ("4X4", "Diesel", "2.8") to the variant.
+  - What the rules can't settle becomes `pending_review` plus a `review_item`.
+- **`consolidate [--min-support 2] [--min-agreement 0.7]`**: builds the spec sheets.
+  - Builds variants, and clusters the same car across portals so it counts as one vote.
+  - Votes each field. Mechanical fields accept one plausible listing; equipment needs
+    `--min-support` listings in that country and `--min-agreement`.
+  - Runs the cross-checks, then publishes `variant_spec`/`variant_market_spec` and logs
+    every change to `spec_history`.
+  - Models whose identity is still unresolved are counted as "waiting" and skipped.
+- **`ai-identity` / `ai-specs`**: Claude Message Batches. Identity sends one request per
+  make; specs sends one per model and country. Both are chunked. Exactly one mode is
+  required:
+  - `--estimate`: builds the requests and prints the cost, without sending anything.
+    `--count-tokens` makes the count exact through the free `count_tokens` API, but it
+    sends the text to Anthropic.
+  - `--submit --confirm`: sends the batch. **It costs money**, so never run it without the
+    user's approval.
+  - `--collect [--run-id N]`: fetches the finished results (default: the latest submitted
+    run) and applies them. Identity results become review cases, individual or sampled.
+    Spec results become `ai_knowledge` evidence in `pending_review`.
+  - Other flags: `--makes Toyota,Mazda` (pilot), `--limit N`, and `--effort` (default `low`
+    for identity, `medium` for specs). `ai-specs` also takes `--min-listings 3`.
+  - Requests already answered are dropped by `input_hash`.
+- **`review export [--out data/review.csv]`**: writes the open review cases as a CSV with
+  a BOM, so Excel opens it correctly.
+  - Rows are ordered by level (makes, models, trims, specs), then by listings unblocked.
+  - Critical fields and identity changes are exported for individual review.
+  - Other AI values are grouped into stratified sample batches of `--sample-size 50`
+    (`--seed 20261120`).
+  - `--min-accuracy 0.95` and `--min-confidence 0.8` set how a sample batch is decided;
+    `--limit` caps the number of rows.
+- **`review import PATH --reviewer NAME`**: applies the filled `decision` column (`approve`,
+  `reject` or `correct`, with `corrected_value`) and records the reviewer.
+  - A sample batch with ≥ 95 % correct turns its values with confidence ≥ 0.8 into
+    `accepted_sampled`. Otherwise the whole batch is rejected.
+  - A correction that doesn't parse or is out of range is counted as `invalid_value` and the
+    case stays pending.
+  - Then run `normalize` and `consolidate` to propagate the decisions.
+- **`review worker [--propagate-idle 120] [--poll 30] [--once]`**: applies the decisions the
+  review website queues in `kb.review_decision` (LISTEN/NOTIFY, plus a poll as a fallback).
+  - Each decision goes through `decide_item` in a savepoint: `applied`, `failed` with the
+    error, or `superseded` when the case was already decided.
+  - Creates sample batches for newly applied AI runs, like `review export` does.
+  - After `--propagate-idle` seconds without decisions it runs `normalize` + `consolidate`
+    (minutes on the full data; queued decisions wait meanwhile). `0` turns it off.
+  - `--once` applies the queue (and propagates if anything was applied), then exits.
+- **`golden sample [--out data/golden_sample.csv] [--size 300] [--seed]`**: a random
+  sample for the team to label, stratified by site, vehicle class and model frequency.
+- **`golden score PATH`**: compares the validated labels with the pipeline. Targets: make
+  and model ≥ 98 %, year ≥ 95 %, trim ≥ 90 %.
+- **`export [--format csv|xlsx|json] [--out PATH] [--with-sources]`**: writes
+  `kb.listing_standardized`, every listing in the strict schema with gaps filled from the
+  knowledge base. The default output is `data/kb_listings.<format>`. `--with-sources` adds a
+  `<field>__src` column per field, saying whether the value came from the listing or from
+  the knowledge base.
+- **`status`**: row counts per table, open review cases by level, and per-field coverage
+  of the published sheets.
+- **`fields-json [--out PATH]`**: writes the field catalog (type, group, unit, range, enum
+  values) the review website validates corrections with. No database needed.
+
+Typical order: `migrate` → `import` → `normalize` → `consolidate` → `review export` / `review
+import` → `normalize` + `consolidate` → `export`. The `ai-*` commands go between `normalize`
+and review, and only with the user's approval. With the review website, `review worker` runs
+instead of `review export`/`import` and propagates by itself.
 
 ## Current site status (see README.md for the up-to-date table)
 

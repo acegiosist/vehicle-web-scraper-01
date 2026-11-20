@@ -13,7 +13,7 @@ python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\a
 pip install -r requirements.txt
 cp .env.example .env                                   # edit USER_AGENT with your contact
 
-python -m pytest                                       # 28 offline tests
+python -m pytest                                       # offline tests (+ PostgreSQL ones, see below)
 PYTHONPATH=src python -m vehicle_scraper sites         # list sites + status
 PYTHONPATH=src python -m vehicle_scraper run --site carroya --site cofino --limit 20
 ```
@@ -155,8 +155,86 @@ src/vehicle_scraper/
   cli.py         command line
   scaffold.py    `new-site`: probe a site from a URL and generate its scraper + test
   sites/         one module per site + generic YAML-driven scraper
+  kb/            knowledge base in PostgreSQL (see below)
+src/web/         review website (Next.js): human decisions on the knowledge base
 config/sites.yaml  extra sites without code
+config/kb/makes.yaml  curated list of makes for the knowledge base
+migrations/      Alembic migrations of the knowledge base
+docs/            data dictionary + ER diagram (diccionario_datos.md), SQL for the site's DB role
 tests/           offline tests with fixtures captured from the real sites
+```
+
+## Knowledge base (PostgreSQL)
+
+Turns the scraped listings into a catalog: **make → model → trim → variant** (year + engine +
+fuel + transmission + drivetrain). Each value carries its source and confidence, so a vehicle's
+specs can be looked up without a third-party service, and every listing can be exported in the
+strict schema with its gaps filled. `data/vehicles.sqlite` is only ever read (read-only mode).
+
+```bash
+pip install -e .[kb]            # Windows behind an inspecting proxy: uv pip install --native-tls -e .[kb]
+export KB_DATABASE_URL=postgresql://user:pass@host:5432/vehicles_kb
+
+alembic upgrade head                            # migrations, by hand (or: vehicle-scraper kb migrate)
+alembic -x url=postgresql://... downgrade base  # undo everything (drops the kb and staging schemas)
+
+vehicle-scraper kb import --sqlite data/vehicles.sqlite   # idempotent; keeps each listing's history
+vehicle-scraper kb normalize                    # rules: makes, models, trims, years (no AI, no cost)
+vehicle-scraper kb consolidate                  # variants, consensus, cross-checks, published sheets
+vehicle-scraper kb ai-identity --estimate       # Claude batch: price it first (sends nothing)
+vehicle-scraper kb ai-identity --submit --confirm   # spends money; then --collect
+vehicle-scraper kb ai-specs --estimate --min-listings 3
+vehicle-scraper kb review export --out data/review.csv  # fill `decision` in Excel
+vehicle-scraper kb review import data/review.csv --reviewer ana
+vehicle-scraper kb review worker                # applies decisions made on the review website
+vehicle-scraper kb golden sample / golden score FILE    # measure identity accuracy
+vehicle-scraper kb export --format xlsx [--with-sources]
+vehicle-scraper kb status
+```
+
+**Data model.** `staging` keeps every imported listing version (a new version only when its
+content changes). `kb` holds `make`/`model`/`trim` (+ `*_alias` tables: a new spelling adds an
+alias, never a duplicate), `variant`, the mechanical sheet `variant_spec` (shared across
+countries), the equipment sheet `variant_market_spec` (one per country), `spec_evidence`
+(provenance of every value), `spec_history`, `review_item`/`review_batch`, `ai_run`/`ai_decision`,
+`listing`/`listing_cluster`, and the views `listing_standardized` and `training_safe_evidence`.
+
+**Rules.**
+- Conflicts are solved top-down: make → model → trim/year → variant → mechanical → equipment,
+  each through *rule → AI proposal → human decision*. A model with open identity questions
+  waits; the others move on.
+- Published value precedence: human > listing consensus > single listing > neighbouring years
+  > AI. A human value is never replaced automatically: contradicting evidence opens a review case.
+- Mechanical values: one plausible listing is enough (confidence 0.6), two or more agreeing
+  (≥ 70 %) give high confidence. Equipment needs two or more listings of that country with
+  ≥ 70 % agreement (one car may have an option fitted).
+- Cross-checks only flag, never correct: motorcycle name number vs cc (BMW G 310 at 1.0 L),
+  trim "1.8" vs displacement, EV with an engine size, hp per litre, seats vs body, outliers
+  within a model.
+- The same car on two portals (or reposted) counts as one vote (same model/year, mileage ±2 %,
+  price ±5 %, dates within 30 days); a person can undo a cluster.
+- AI (Claude Opus 5.5, Message Batches): only text from sites with `kb.source_site.ai_allowed`
+  is sent — **Cofino is excluded** (`ai-train=no`). Every AI value starts `pending_review`:
+  critical fields one by one, the rest by sampling (≥ 95 % correct in a stratified sample →
+  the batch's values with confidence ≥ 0.8 become `accepted_sampled`). Identical requests are
+  never resent (`input_hash`).
+
+**Review website (`src/web`).** The same human decisions as the CSV, on a web page: the queue in
+review order, each case with its evidence and listings, and *approve / reject / correct* with
+the corrected value checked against the field's type and range. The site only queues decisions
+in `kb.review_decision`; `vehicle-scraper kb review worker` applies them with the same code as
+`kb review import` (Postgres `LISTEN/NOTIFY`, within a second) and, after a quiet period, runs
+`normalize` + `consolidate` so the next level of cases appears. The site connects with its own
+role (`docs/sql/review_web_role.sql`) that can read the knowledge base and only insert
+decisions. No login yet: it listens on 127.0.0.1 only and the reviewer types their name. Setup
+and commands: [`src/web/README.md`](src/web/README.md).
+
+**Tests against PostgreSQL** run when `KB_TEST_DATABASE_URL` points to a server where the user
+can create databases (each test makes and drops its own):
+
+```bash
+docker run -d --name vehicle-kb-test -e POSTGRES_USER=kb -e POSTGRES_PASSWORD=kbtest -p 55432:5432 postgres:16-alpine
+KB_TEST_DATABASE_URL=postgresql://kb:kbtest@localhost:55432/kb python -m pytest tests/test_kb_pg.py
 ```
 
 ## Responsible use

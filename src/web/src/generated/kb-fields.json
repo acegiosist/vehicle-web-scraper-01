@@ -1,0 +1,414 @@
+{
+  "version": 1,
+  "fields": {
+    "engine_displacement_l": {
+      "kind": "float",
+      "group": "key",
+      "critical": true,
+      "unit": "L",
+      "range": [
+        0.04,
+        20
+      ]
+    },
+    "fuel_type": {
+      "kind": "enum",
+      "group": "key",
+      "critical": true,
+      "unit": null,
+      "values": [
+        "Gasoline",
+        "Diesel",
+        "Hybrid",
+        "EV",
+        "CNG"
+      ]
+    },
+    "transmission_type": {
+      "kind": "enum",
+      "group": "key",
+      "critical": true,
+      "unit": null,
+      "values": [
+        "Manual",
+        "Automatic",
+        "CVT",
+        "DCT"
+      ]
+    },
+    "drivetrain": {
+      "kind": "enum",
+      "group": "key",
+      "critical": true,
+      "unit": null,
+      "values": [
+        "FWD",
+        "RWD",
+        "AWD",
+        "4WD",
+        "2WD"
+      ]
+    },
+    "engine_cylinders": {
+      "kind": "int",
+      "group": "mech",
+      "critical": false,
+      "unit": null,
+      "range": [
+        1,
+        16
+      ]
+    },
+    "horsepower_hp": {
+      "kind": "int",
+      "group": "mech",
+      "critical": true,
+      "unit": "hp",
+      "range": [
+        1,
+        2000
+      ]
+    },
+    "fuel_tank_capacity_l": {
+      "kind": "float",
+      "group": "mech",
+      "critical": false,
+      "unit": "L",
+      "range": [
+        1,
+        1500
+      ]
+    },
+    "seats": {
+      "kind": "int",
+      "group": "mech",
+      "critical": true,
+      "unit": null,
+      "range": [
+        1,
+        80
+      ]
+    },
+    "doors": {
+      "kind": "int",
+      "group": "mech",
+      "critical": true,
+      "unit": null,
+      "range": [
+        0,
+        6
+      ]
+    },
+    "cargo_capacity_l": {
+      "kind": "int",
+      "group": "mech",
+      "critical": false,
+      "unit": "L",
+      "range": [
+        10,
+        100000
+      ]
+    },
+    "wheel_size_in": {
+      "kind": "int",
+      "group": "mech",
+      "critical": false,
+      "unit": "in",
+      "range": [
+        8,
+        30
+      ]
+    },
+    "tire_size": {
+      "kind": "text",
+      "group": "mech",
+      "critical": false,
+      "unit": null
+    },
+    "fuel_economy_kml": {
+      "kind": "float",
+      "group": "mech",
+      "critical": false,
+      "unit": "km/L",
+      "range": [
+        1,
+        100
+      ]
+    },
+    "ev_range_km": {
+      "kind": "int",
+      "group": "mech",
+      "critical": false,
+      "unit": "km",
+      "range": [
+        10,
+        1500
+      ]
+    },
+    "ev_charging_speed_kw": {
+      "kind": "float",
+      "group": "mech",
+      "critical": false,
+      "unit": "kW",
+      "range": [
+        1,
+        1000
+      ]
+    },
+    "body_style": {
+      "kind": "enum",
+      "group": "mech",
+      "critical": true,
+      "unit": null,
+      "values": [
+        "SUV",
+        "Sedan",
+        "Pickup",
+        "Hatchback",
+        "Coupe",
+        "Van",
+        "Convertible",
+        "Wagon",
+        "Truck",
+        "Minivan",
+        "Motorcycle"
+      ]
+    },
+    "country_of_manufacture": {
+      "kind": "text",
+      "group": "mech",
+      "critical": false,
+      "unit": null
+    },
+    "abs": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "airbags_count": {
+      "kind": "int",
+      "group": "equip",
+      "critical": false,
+      "unit": null,
+      "range": [
+        0,
+        14
+      ]
+    },
+    "stability_control": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "traction_control": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "adaptive_cruise_control": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "lane_assist": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "automatic_emergency_braking": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "blind_spot_monitoring": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "led_lights": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "fog_lights": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "sunroof": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "panoramic_roof": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "roof_rails": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "alloy_wheels": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "leather_seats": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "power_seats": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "heated_seats": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "cooled_seats": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "memory_seats": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "climate_control": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "dual_zone_ac": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "keyless_entry": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "push_button_start": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "screen_size_in": {
+      "kind": "float",
+      "group": "equip",
+      "critical": false,
+      "unit": "in",
+      "range": [
+        2,
+        25
+      ]
+    },
+    "bluetooth": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "apple_carplay": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "android_auto": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "navigation": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "reverse_camera": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "camera_360": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "front_camera": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "parking_sensors": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "automatic_parking": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "alarm": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "immobilizer": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "tow_package": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    },
+    "bed_liner": {
+      "kind": "bool",
+      "group": "equip",
+      "critical": false,
+      "unit": null
+    }
+  }
+}

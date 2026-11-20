@@ -149,10 +149,17 @@ def main(argv: list[str] | None = None) -> int:
     ns.add_argument("--force", action="store_true", help="overwrite an existing site module")
     ns.add_argument("--dry-run", action="store_true", help="print the generated files, write nothing")
 
+    from .kb.cli import add_parser as add_kb_parser
+    add_kb_parser(sub)
+
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
     load_yaml_sites(args.sites_file)
+
+    if args.cmd == "kb":                      # PostgreSQL knowledge base (optional extra `kb`)
+        from .kb.cli import run as run_kb
+        return run_kb(args)
 
     if args.cmd == "new-site":
         return cli_new_site(args)
