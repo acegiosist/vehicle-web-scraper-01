@@ -57,11 +57,7 @@ def add_parser(sub) -> None:
     ri = rs.add_parser("import", help="apply decisions from a filled review CSV")
     ri.add_argument("path", type=Path)
     ri.add_argument("--reviewer", required=True, help="who reviewed (stored with each decision)")
-    rw = rs.add_parser("worker", help="apply decisions queued by the review website (src/web)")
-    rw.add_argument("--propagate-idle", type=float, default=120.0,
-                    help="seconds without new decisions before running normalize + consolidate (0 = never)")
-    rw.add_argument("--poll", type=float, default=30.0, help="max seconds between queue checks")
-    rw.add_argument("--once", action="store_true", help="apply the queue once (and propagate), then exit")
+    _worker_args(rs.add_parser("worker", help="same as `kb worker`"))
 
     gs = ks.add_parser("golden", help="identity accuracy: labelled sample vs pipeline")
     gss = gs.add_subparsers(dest="golden_cmd", required=True)
@@ -79,8 +75,17 @@ def add_parser(sub) -> None:
 
     ks.add_parser("status", help="counts per table, review queue, coverage of the published sheets")
 
+    _worker_args(ks.add_parser("worker", help="apply decisions and run jobs queued by the review website (src/web)"))
+
     fj = ks.add_parser("fields-json", help="field types/ranges/units for the review website (no database)")
     fj.add_argument("--out", type=Path, default=ROOT / "src" / "web" / "src" / "generated" / "kb-fields.json")
+
+
+def _worker_args(w) -> None:
+    w.add_argument("--propagate-idle", type=float, default=120.0,
+                   help="seconds without new decisions before running normalize + consolidate (0 = never)")
+    w.add_argument("--poll", type=float, default=30.0, help="max seconds between queue checks")
+    w.add_argument("--once", action="store_true", help="apply decisions and run queued jobs once, then exit")
 
 
 # Commands that only read; every other one takes the writer lock (one writer at a time).
@@ -95,7 +100,7 @@ def run(args) -> int:
         args.out.write_text(json.dumps(fields_catalog(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"Wrote {args.out}")
         return 0
-    if args.kb_cmd == "review" and args.review_cmd == "worker":
+    if args.kb_cmd == "worker" or (args.kb_cmd == "review" and args.review_cmd == "worker"):
         import logging
         from .worker import WorkerSettings, run_worker
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -109,6 +114,7 @@ def run(args) -> int:
                "downgrade" if args.downgrade else "upgrade", args.revision]
         return subprocess.call(cmd, cwd=ROOT)
 
+    from . import commands
     from .db import connect, writer_lock
     with connect(args.database_url) as conn:
         if args.kb_cmd not in READ_ONLY:
@@ -125,25 +131,11 @@ def run(args) -> int:
                     print(f"New sources registered with AI and training OFF: {', '.join(s['unknown_sites'])} "
                           "(review their terms, then UPDATE kb.source_site)")
         elif args.kb_cmd == "normalize":
-            from .identity import normalize
-            s = normalize(conn)
-            print(f"Listings: {s.listings}  new makes: {s.makes_new}  new models: {s.models_new}  "
-                  f"new trims: {s.trims_new}  new review cases: {s.review_items}")
-            if s.excluded:
-                print("Excluded: " + ", ".join(f"{k}={v}" for k, v in s.excluded.most_common()))
+            print(commands.run_normalize(conn).summary)
         elif args.kb_cmd == "consolidate":
-            from .consensus import Settings, consolidate
-            s = consolidate(conn, Settings(args.min_support, args.min_agreement))
-            print(f"Listings used: {s.listings} (waiting on identity: {s.waiting})  variants: {s.variants}  "
-                  f"partial matches: {s.partial_matches}  clusters: {s.clusters}")
-            print("Evidence: " + ", ".join(f"{k}={v}" for k, v in sorted(s.evidence.items())))
-            if s.flagged:
-                print("Flagged for review: " + ", ".join(f"{k}={v}" for k, v in s.flagged.most_common()))
-            print(f"Published: {s.published_mech} mechanical sheets, {s.published_equip} equipment sheets, "
-                  f"{s.changes} field changes recorded in spec_history")
+            print(commands.run_consolidate(conn, args.min_support, args.min_agreement).summary)
         elif args.kb_cmd in ("ai-identity", "ai-specs"):
-            from .ai_batch import run_cli
-            return run_cli(conn, args)
+            return _ai(conn, args)
         elif args.kb_cmd == "review":
             from .review import export_review, import_review
             if args.review_cmd == "export":
@@ -167,11 +159,35 @@ def run(args) -> int:
                 for line in golden_score(conn, args.path):
                     print(line)
         elif args.kb_cmd == "export":
-            from .export import export
             out = args.out or Path(f"data/kb_listings.{args.format}")
-            n = export(conn, out, args.format, args.with_sources)
-            print(f"Exported {n} standardized listings to {out}")
+            print(commands.run_export(conn, args.format, args.with_sources, out=out).summary)
         elif args.kb_cmd == "status":
             from .export import status
             print(status(conn))
+    return 0
+
+
+def _ai(conn, args) -> int:
+    from . import commands
+    kind = "identity" if args.kb_cmd == "ai-identity" else "specs"
+    if args.collect:
+        print(commands.ai_collect(conn, args.run_id).summary)
+        return 0
+    makes = args.makes.split(",") if args.makes else None
+    min_listings = getattr(args, "min_listings", 3)
+    est = commands.ai_estimate(conn, kind, args.effort, makes, args.limit, min_listings,
+                               getattr(args, "count_tokens", False))
+    print(est.summary)
+    if args.estimate or not est.result["requests"]:
+        return 0
+    if not args.confirm:
+        print("Not sent: --submit spends money. Re-run with --submit --confirm once the estimate is approved.")
+        return 2
+    try:
+        sent = commands.ai_submit(conn, kind, args.effort, makes, args.limit, min_listings,
+                                  expected_fingerprint=est.result["fingerprint"])
+    except commands.SubmitRefused as exc:          # e.g. over the AI budget: nothing was sent
+        print(f"Not sent: {exc}")
+        return 2
+    print(sent.summary + f" Collect with: kb {args.kb_cmd} --collect --run-id {sent.result['ai_run_id']}")
     return 0

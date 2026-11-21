@@ -41,7 +41,7 @@ PYTHONPATH=src python -m vehicle_scraper kb ai-identity --estimate     # --submi
 PYTHONPATH=src python -m vehicle_scraper kb review export --out data/review.csv
 PYTHONPATH=src python -m vehicle_scraper kb status
 KB_TEST_DATABASE_URL=postgresql://kb:kbtest@localhost:55432/kb python -m pytest tests/test_kb_pg.py   # needs a Postgres
-PYTHONPATH=src python -m vehicle_scraper kb review worker            # applies decisions queued by the review site
+PYTHONPATH=src python -m vehicle_scraper kb worker                   # applies decisions + runs jobs queued by the review site
 
 # review website (src/web, Next.js; needs src/web/.env.local with REVIEW_WEB_DATABASE_URL)
 cd src/web && pnpm install && pnpm dev                 # http://127.0.0.1:3000
@@ -152,10 +152,12 @@ evidence, cross-checks, publish to `variant_spec`/`variant_market_spec`) → `ai
 Invariants worth keeping:
 - Everything is idempotent and goes through alias tables + `UNIQUE` keys: re-running never
   duplicates; listing-derived evidence is recomputed, AI/manual evidence is never touched by
-  `consolidate`.
+  `consolidate`. `identity.open_review` refreshes an open case, but a case with an
+  `ai_decision_id` keeps its AI `source` and `kind` when the rules re-open it.
 - Precedence `RANK` in consensus.py: manual > listing_consensus > listing_single > sibling > AI. A
   manual value is never replaced; conflicting evidence opens `conflicts_with_human`.
-- Nothing from the AI is accepted without review; text from sites with `ai_allowed = false`
+- Spending on Claude goes only through `commands.ai_submit`, which checks the budget
+  (`budget.budget_status`) under the writer lock. Nothing from the AI is accepted without review; text from sites with `ai_allowed = false`
   (Cofino) must never reach a prompt. `--submit` needs `--confirm` (it costs money).
 - Cross-checks flag (`pending_review` + review case), they never correct. A decided case
   (`_decision`) is not asked again.
@@ -165,6 +167,8 @@ Invariants worth keeping:
   memoization; bump `PROMPT_VERSION` when changing them.
 - One writer at a time: every `kb` command except `status`/`export`/`golden`, and each cycle of
   the review worker, takes `db.writer_lock` (a transaction-scoped advisory lock).
+- `kb/commands.py` holds the commands the CLI and the worker share (normalize, consolidate,
+  recalculate, export, AI estimate/submit/collect). The CLI only prints their `summary`.
 - `review.decide_item` is the **only** path that applies a human decision (CSV import and the
   worker both call it). A correction that doesn't fit its field raises `InvalidValue` and leaves
   the case pending (`invalid_value`), it is never silently dropped.
@@ -176,12 +180,25 @@ through the least-privilege role in `docs/sql/review_web_role.sql`. An AFTER INS
 NOTIFYs `kb_review_decision`; `kb/worker.py` (`kb review worker`) applies each queued decision
 with `decide_item` in its own savepoint (`applied` / `failed` + error / `superseded`), closes
 sample batches, and after `--propagate-idle` quiet seconds runs normalize + consolidate.
+**Jobs** (migration 0003): `/tareas` INSERTs into `kb.job` (whitelisted `command` + `params`); the
+worker claims one at a time (`running`, committed), runs `commands.py` under the writer lock and
+commits the changes together with `done` + `summary`/`result` (exports go to `kb.job_file`, gzip
+for csv/json, last 10 kept); any error rolls back and marks it `failed`. The site can only cancel
+a queued job, through `kb.cancel_job()` (SECURITY DEFINER). `/estado` reads the same numbers as
+`kb status` directly. **Sending to Claude from the site** needs `KB_WEB_AI_SUBMIT=true` (site, shows
+the form) and `KB_ALLOW_WEB_AI_SUBMIT=true` (worker, the real guard); the worker also requires an
+`ai_estimate` job finished < 60 min ago, the same request fingerprint, and `confirm_usd` ≥ the
+estimate. The spending limit (`kb/budget.py`) applies on top, to the site and the CLI: the estimate
+carries `budget` and the site disables "Enviar a Claude" with its message. Tests replace `worker._submit_fn`; never send a real batch without the user's approval.
 Things to keep in sync:
 - `src/web/src/lib/issues.ts` describes each `issue` and what approve/reject/correct do; it
   mirrors `apply_decision`. A new issue or a new effect needs both.
 - `src/web/src/generated/kb-fields.json` comes from `kb fields-json` (`fields.fields_catalog`);
   `tests/test_kb_fields_json.py` fails when it is stale. `src/web/src/generated/db.d.ts` comes
   from `pnpm db:types` after a migration.
+- Job parameters are validated twice: `src/web/src/lib/jobs.ts` (Zod) and `worker.execute_job`.
+  A new command needs both, plus the CHECK in the migration and `COMMAND_LABELS`.
+- After a migration, re-run `docs/sql/review_web_grants.sql` (the site's role) and `pnpm db:types`.
 - `kb.listing_number()` (SQL, sha256) and `identity.listing_number()` (Python) must agree.
 - Next.js 16 with Cache Components: request data (`searchParams`, `cookies`, `usePathname`) and
   DB reads (`io()` in `lib/queries`) must sit inside `<Suspense>`. Read
@@ -196,7 +213,9 @@ in pipeline order:
 
 - **`migrate [REVISION] [--downgrade]`**: wraps `alembic -x url=... upgrade|downgrade`
   (default `head`). `--downgrade base` drops the `staging` and `kb` schemas. Revisions:
-  `0001_kb_schema`, `0002_review_web` (decision inbox, `review_queue` view).
+  `0001_kb_schema`, `0002_review_web` (decision inbox, `review_queue` view), `0003_web_jobs`
+  (`job`, `job_file`, `cancel_job()`), `0004_queue_ai_origin` (`review_queue.from_ai`/`ai_run_id`),
+  `0005_ai_run_cost` (`ai_run.actual_cost_usd`, `cache_write_tokens`).
 - **`import [--sqlite data/vehicles.sqlite]`**: copies listings into `staging.raw_listing`,
   opening the file read-only.
   - A file whose sha256 was already imported is skipped.
@@ -221,7 +240,11 @@ in pipeline order:
     `--count-tokens` makes the count exact through the free `count_tokens` API, but it
     sends the text to Anthropic.
   - `--submit --confirm`: sends the batch. **It costs money**, so never run it without the
-    user's approval.
+    user's approval. Refused (nothing sent, exit 2) when it doesn't fit the spending limit:
+    `KB_AI_BUDGET_USD` per `KB_AI_BUDGET_PERIOD` (`daily` by default, `weekly`, `monthly`, in
+    the machine's local time), re-read from `.env` on every submission. Spent = each run
+    submitted in the period, at its real cost once collected (`ai_run.actual_cost_usd`) or its
+    estimate until then. Without a valid limit nothing is sent.
   - `--collect [--run-id N]`: fetches the finished results (default: the latest submitted
     run) and applies them. Identity results become review cases, individual or sampled.
     Spec results become `ai_knowledge` evidence in `pending_review`.
@@ -243,14 +266,21 @@ in pipeline order:
   - A correction that doesn't parse or is out of range is counted as `invalid_value` and the
     case stays pending.
   - Then run `normalize` and `consolidate` to propagate the decisions.
-- **`review worker [--propagate-idle 120] [--poll 30] [--once]`**: applies the decisions the
-  review website queues in `kb.review_decision` (LISTEN/NOTIFY, plus a poll as a fallback).
+- **`worker [--propagate-idle 120] [--poll 30] [--once]`** (alias `review worker`): applies the
+  decisions the review website queues in `kb.review_decision` and runs its jobs from `kb.job`
+  (LISTEN/NOTIFY on both, plus a poll as a fallback). Decisions go first, then one job at a time.
   - Each decision goes through `decide_item` in a savepoint: `applied`, `failed` with the
     error, or `superseded` when the case was already decided.
   - Creates sample batches for newly applied AI runs, like `review export` does.
   - After `--propagate-idle` seconds without decisions it runs `normalize` + `consolidate`
     (minutes on the full data; queued decisions wait meanwhile). `0` turns it off.
-  - `--once` applies the queue (and propagates if anything was applied), then exits.
+  - `--once` applies the queue, runs the queued jobs (and propagates if a decision was
+    applied), then exits.
+  - On start it marks jobs left `running` by a stopped worker as `failed`.
+  - `ai_submit` jobs are refused unless `KB_ALLOW_WEB_AI_SUBMIT=true`. The worker re-reads it
+    from `.env` on every submission (`worker.ai_submit_allowed`), so no restart is needed to
+    switch it; a value in `.env` wins over the process environment (`kb/settings.py`, also used
+    for the spending limit, which `ai_submit` jobs must fit too).
 - **`golden sample [--out data/golden_sample.csv] [--size 300] [--seed]`**: a random
   sample for the team to label, stratified by site, vehicle class and model frequency.
 - **`golden score PATH`**: compares the validated labels with the pipeline. Targets: make
@@ -267,8 +297,8 @@ in pipeline order:
 
 Typical order: `migrate` → `import` → `normalize` → `consolidate` → `review export` / `review
 import` → `normalize` + `consolidate` → `export`. The `ai-*` commands go between `normalize`
-and review, and only with the user's approval. With the review website, `review worker` runs
-instead of `review export`/`import` and propagates by itself.
+and review, and only with the user's approval. With the review website, `kb worker` runs
+instead of `review export`/`import`, propagates by itself, and runs the jobs queued on `/tareas`.
 
 ## Current site status (see README.md for the up-to-date table)
 

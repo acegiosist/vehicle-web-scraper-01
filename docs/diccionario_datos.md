@@ -3,7 +3,10 @@
 Base PostgreSQL (versión 15 o superior) creada por las migraciones Alembic
 [`0001_kb_schema`](../migrations/versions/0001_kb_schema.py) y
 [`0002_review_web`](../migrations/versions/0002_review_web.py) (bandeja de decisiones del sitio de
-revisión `src/web`). La alimentan los anuncios de `data/vehicles.sqlite`, que se abre siempre en
+revisión `src/web`), [`0003_web_jobs`](../migrations/versions/0003_web_jobs.py) (tareas que el sitio
+encola), [`0004_queue_ai_origin`](../migrations/versions/0004_queue_ai_origin.py) (origen IA en la
+cola) y [`0005_ai_run_cost`](../migrations/versions/0005_ai_run_cost.py) (costo real de cada corrida de
+IA). La alimentan los anuncios de `data/vehicles.sqlite`, que se abre siempre en
 solo lectura.
 
 | Esquema | Para qué |
@@ -76,6 +79,9 @@ erDiagram
     ai_decision |o--o{ review_item : "origen"
     spec_evidence |o--o{ review_item : "caso sobre"
     review_item ||--o{ review_decision : "decisiones del sitio"
+    job ||--o| job_file : "archivo exportado"
+    job |o..o{ job : "ai_submit usa un ai_estimate"
+    job |o..o| ai_run : "ai_submit crea"
     source_site }o..o{ spec_evidence : "sites[]"
 
     import_snapshot {
@@ -255,6 +261,21 @@ erDiagram
         text status
         text error
     }
+    job {
+        bigint id PK
+        text command
+        jsonb params
+        text requested_by
+        text status
+        text summary
+        jsonb result
+    }
+    job_file {
+        bigint job_id PK
+        text filename
+        boolean gzipped
+        bytea bytes
+    }
     review_batch {
         bigint id PK
         bigint ai_run_id FK
@@ -272,6 +293,7 @@ erDiagram
         text effort
         text status
         numeric est_cost_usd
+        numeric actual_cost_usd
     }
     ai_decision {
         bigint id PK
@@ -625,11 +647,11 @@ y una pregunta ya decidida no se vuelve a hacer.
 | `proposed` | jsonb | sí | | Propuesta (de la IA o de una regla). |
 | `current` | jsonb | sí | | Valor actual o detalle de la validación. |
 | `evidence` | jsonb | sí | | Contexto: grafías, sitios, años, anuncios. |
-| `source` | text | no | | `rule`, `ai` o `merge`. |
+| `source` | text | no | | `rule`, `ai` o `merge`. Un caso que la IA respondió sigue en `ai` aunque `normalize` lo vuelva a abrir. |
 | `kind` | text | no | | `individual` (caso por caso) o `sample` (parte de un lote por muestreo). |
 | `review_batch_id` | bigint | sí | | FK → `review_batch.id`. |
 | `evidence_id` | bigint | sí | | FK → `spec_evidence.id`. |
-| `ai_decision_id` | bigint | sí | | FK → `ai_decision.id`. |
+| `ai_decision_id` | bigint | sí | | FK → `ai_decision.id`. Respuesta de la IA cuya propuesta está en `proposed`. |
 | `listings_affected` | integer | no | 0 | Anuncios que desbloquea. La cola se ordena por nivel y luego por este número. |
 | `status` | text | no | `pending` | `pending`, `approved`, `rejected` o `corrected`. |
 | `corrected_value` | jsonb | sí | | Valor correcto, cuando `status = corrected`. |
@@ -683,6 +705,43 @@ Cada decisión tomada en el sitio web (`src/web`). El sitio solo inserta aquí; 
   `review_item_id`, `decision`, `corrected_value`, `note` y `reviewer`; `status` y `error` los
   escribe el worker.
 
+### `kb.job`: tareas que encola el sitio
+Comandos `kb` pedidos desde `/tareas`. El sitio solo inserta `command`, `params` y `requested_by`; el
+worker (`vehicle-scraper kb worker`) los ejecuta uno a uno con `kb/commands.py`, el mismo código del
+CLI. Migración `0003_web_jobs`.
+
+| Columna | Tipo | Nulo | Default | Descripción |
+|---|---|---|---|---|
+| `id` | bigint | no | serial | PK. |
+| `command` | text | no | | `normalize`, `consolidate`, `recalculate`, `export`, `ai_estimate`, `ai_collect` o `ai_submit`. |
+| `params` | jsonb | no | '{}' | Parámetros (objeto). El sitio y el worker los validan contra una lista cerrada. |
+| `requested_by` | text | no | | Quién la pidió (1 a 100 caracteres). |
+| `status` | text | no | 'queued' | `queued`, `running`, `done`, `failed` o `canceled`. |
+| `summary` | text | sí | | Resumen legible (lo mismo que imprime el CLI). |
+| `result` | jsonb | sí | | Resultado estructurado. En `ai_estimate`: parámetros, estimado y `fingerprint` de los requests. |
+| `error` | text | sí | | Por qué falló. Si falla, ningún cambio de la tarea queda guardado. |
+| `created_at` | timestamptz | no | now() | Cuándo se pidió. |
+| `started_at`, `finished_at` | timestamptz | sí | | Cuándo empezó y terminó. |
+
+- Índice único parcial `job_active`: la misma tarea (`command` + `params`) no puede estar dos veces
+  en cola o corriendo.
+- Trigger `job_notify` (`AFTER INSERT`): `pg_notify('kb_job', id)` despierta al worker.
+- Función `kb.cancel_job(id)` (`SECURITY DEFINER`): pasa una tarea `queued` a `canceled`. Es lo único
+  que el rol del sitio puede modificar.
+- `ai_submit` (cuesta dinero) solo se ejecuta si el worker tiene `KB_ALLOW_WEB_AI_SUBMIT=true`, apunta a
+  un `ai_estimate` terminado hace menos de 60 minutos, los requests siguen siendo los mismos
+  (`fingerprint`) y `confirm_usd` cubre el costo estimado.
+
+### `kb.job_file`: archivos de las tareas
+| Columna | Tipo | Nulo | Default | Descripción |
+|---|---|---|---|---|
+| `job_id` | bigint | no | | PK, FK → `job.id` (`ON DELETE CASCADE`). |
+| `filename` | text | no | | Nombre de descarga (`kb_listings.csv`, `kb_listings_sources.xlsx`…). |
+| `content_type` | text | no | | Tipo MIME. |
+| `gzipped` | boolean | no | | `true` para CSV y JSON (se guardan comprimidos); el XLSX ya viene comprimido. |
+| `size` | bigint | no | | Tamaño sin comprimir, en bytes. |
+| `bytes` | bytea | no | | El archivo. Se conservan solo las últimas 10 exportaciones. |
+
 ---
 
 ## 9. IA (Claude, Message Batches)
@@ -699,8 +758,9 @@ Cada decisión tomada en el sitio web (`src/web`). El sitio solo inserta aquí; 
 | `status` | text | no | `prepared` | `prepared`, `submitted`, `ended`, `applied` o `canceled`. |
 | `request_count` | integer | no | 0 | Requests del batch. |
 | `submitted_at`, `ended_at` | timestamptz | sí | | |
-| `input_tokens`, `output_tokens`, `cache_read_tokens` | bigint | no | 0 | Consumo real reportado por la API. |
+| `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` | bigint | no | 0 | Consumo real reportado por la API (`cache_write_tokens`: migración `0005`). |
 | `est_cost_usd` | numeric(10,4) | sí | | Costo estimado antes de enviar. |
+| `actual_cost_usd` | numeric(10,4) | sí | | Costo real del lote, calculado con su consumo al recogerlo (`NULL` mientras no se recoge). Migración `0005`. |
 | `created_at` | timestamptz | no | now() | |
 
 ### `kb.ai_decision`: un request y su respuesta
@@ -741,7 +801,9 @@ lista el sitio de revisión y lo que exporta `kb review export`.
   - `make_id`, `make_name`, `model_id`, `model_name`, `variant_id` y `vehicle_class`, según la entidad;
   - `entity_label`: "Marca", "Marca / Modelo", la variante completa (marca, modelo, versión, año,
     cilindrada, combustible, transmisión y tracción) o el anuncio (`portal:id` y lo que escribió el vendedor);
-  - `queued_decision_id`: la decisión en cola para el caso, si la hay.
+  - `queued_decision_id`: la decisión en cola para el caso, si la hay;
+  - `from_ai`: la propuesta viene de un lote de Claude (`ai_decision_id` no nulo), y `ai_run_id`, la
+    corrida de ese lote. Migración `0004_queue_ai_origin`.
 - Orden de revisión: `level`, individuales antes que muestra, `listings_affected` descendente, `id`.
 
 ### `kb.training_safe_evidence`

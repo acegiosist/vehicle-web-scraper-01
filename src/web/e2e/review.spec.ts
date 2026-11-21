@@ -1,17 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import { signIn } from "./helpers";
+
 // The seed (tests/e2e_review_web.py) opens three cases: an unknown make "Zzzmotors", its model
 // "Thing", and Chevrolet Tracker listings that disagree on the number of seats (3 vs 3).
 
-test.beforeEach(async ({ page }) => {
-  await page.goto("/cola");
-  const name = page.getByLabel("Tu nombre");
-  if (await name.isVisible()) {
-    await name.fill("E2E Revisor");
-    await page.getByRole("button", { name: "Guardar" }).click();
-  }
-  await expect(page.getByText("Revisando como")).toContainText("E2E Revisor");
-});
+test.beforeEach(async ({ page }) => signIn(page));
 
 test("the queue lists the open cases in review order", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Cola de revisión" })).toBeVisible();
@@ -44,6 +38,22 @@ test("a spec correction is validated, queued and applied by the worker", async (
   const row = page.getByRole("row", { name: /Chevrolet Tracker/ });
   await expect(row).toContainText("Aplicada");
   await expect(row).toContainText("Ficha del fabricante: 5 puestos");
+});
+
+test("cases with an AI proposal are marked and can be filtered", async ({ page }) => {
+  // the seed collects a fake identity batch that proposes the make Zzzmotors
+  const makeRow = page.getByRole("row").filter({ hasText: "Zzzmotors" }).filter({ hasText: "Marca" }).first();
+  await expect(makeRow.getByText("IA", { exact: true })).toBeVisible();
+  await expect(makeRow.getByText("Propuesta de la IA (corrida #1): necesita tu revisión")).toBeVisible();
+
+  await page.getByLabel("Origen").selectOption("ai");
+  await page.getByRole("button", { name: "Filtrar" }).click();
+  await expect(page).toHaveURL(/origin=ai/);
+  await expect(page.getByText("1 caso · página 1 de 1")).toBeVisible();
+
+  await page.getByRole("link", { name: "Zzzmotors", exact: true }).click();
+  await expect(page.getByText("Propuesta de la IA · corrida #1")).toBeVisible();
+  await expect(page.getByText(/Corrida #1 de Claude, confianza 70 %/)).toBeVisible();
 });
 
 test("approving a make with the keyboard", async ({ page }) => {

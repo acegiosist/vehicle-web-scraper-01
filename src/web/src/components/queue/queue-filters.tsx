@@ -19,7 +19,7 @@ export function QueueFiltersForm({ options, filters }: Props) {
     <Form
       action="/cola"
       key={JSON.stringify(filters)}
-      className="grid grid-cols-2 items-end gap-3 rounded-xl border p-3 sm:grid-cols-4 lg:grid-cols-7"
+      className="grid grid-cols-2 items-end gap-3 rounded-xl border p-3 sm:grid-cols-4 xl:grid-cols-[repeat(7,minmax(0,1fr))_auto]"
       aria-label="Filtros"
     >
       <Field label="Nivel" htmlFor="f-level">
@@ -57,6 +57,13 @@ export function QueueFiltersForm({ options, filters }: Props) {
           <option value="">Todas</option>
           <option value="individual">Individual</option>
           <option value="sample">Muestra de lote</option>
+        </NativeSelect>
+      </Field>
+      <Field label="Origen" htmlFor="f-origin">
+        <NativeSelect id="f-origin" name="origin" defaultValue={filters.origin ?? ""}>
+          <option value="">Todos</option>
+          <option value="ai">Propuesta de la IA</option>
+          <option value="rules">Reglas</option>
         </NativeSelect>
       </Field>
       <Field label="Marca" htmlFor="f-make">

@@ -186,7 +186,7 @@ vehicle-scraper kb ai-identity --submit --confirm   # spends money; then --colle
 vehicle-scraper kb ai-specs --estimate --min-listings 3
 vehicle-scraper kb review export --out data/review.csv  # fill `decision` in Excel
 vehicle-scraper kb review import data/review.csv --reviewer ana
-vehicle-scraper kb review worker                # applies decisions made on the review website
+vehicle-scraper kb worker                       # applies decisions + runs jobs from the review website
 vehicle-scraper kb golden sample / golden score FILE    # measure identity accuracy
 vehicle-scraper kb export --format xlsx [--with-sources]
 vehicle-scraper kb status
@@ -224,9 +224,14 @@ review order, each case with its evidence and listings, and *approve / reject / 
 the corrected value checked against the field's type and range. The site only queues decisions
 in `kb.review_decision`; `vehicle-scraper kb review worker` applies them with the same code as
 `kb review import` (Postgres `LISTEN/NOTIFY`, within a second) and, after a quiet period, runs
-`normalize` + `consolidate` so the next level of cases appears. The site connects with its own
-role (`docs/sql/review_web_role.sql`) that can read the knowledge base and only insert
-decisions. No login yet: it listens on 127.0.0.1 only and the reviewer types their name. Setup
+`normalize` + `consolidate` so the next level of cases appears. From **Tareas** the site also
+queues `kb` commands (recalculate, export with download, AI estimate/collect) that the same worker
+runs, and **Estado** shows what `kb status` shows. Sending a batch to Claude from the site is off
+unless both `KB_WEB_AI_SUBMIT` (site) and `KB_ALLOW_WEB_AI_SUBMIT` (worker) are `true`, and then it
+asks for the estimated amount. Every submission, from the site or the CLI, must also fit the
+spending limit `KB_AI_BUDGET_USD` per `KB_AI_BUDGET_PERIOD` (daily, weekly or monthly) in `.env`;
+without it nothing is sent. The site connects with its own role (`docs/sql/review_web_role.sql`
++ `review_web_grants.sql`) that can read the knowledge base and only insert decisions and jobs. No login yet: it listens on 127.0.0.1 only and the reviewer types their name. Setup
 and commands: [`src/web/README.md`](src/web/README.md).
 
 **Tests against PostgreSQL** run when `KB_TEST_DATABASE_URL` points to a server where the user

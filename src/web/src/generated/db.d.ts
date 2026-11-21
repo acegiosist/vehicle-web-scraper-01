@@ -40,8 +40,13 @@ export interface KbAiDecision {
 }
 
 export interface KbAiRun {
+  /**
+   * Real cost of the collected batch (USD), from its token usage. NULL until collected.
+   */
+  actual_cost_usd: Numeric | null;
   batch_id: string | null;
   cache_read_tokens: Generated<Int8>;
+  cache_write_tokens: Generated<Int8>;
   created_at: Generated<Timestamp>;
   effort: string;
   ended_at: Timestamp | null;
@@ -54,6 +59,29 @@ export interface KbAiRun {
   request_count: Generated<number>;
   status: Generated<string>;
   submitted_at: Timestamp | null;
+}
+
+export interface KbJob {
+  command: string;
+  created_at: Generated<Timestamp>;
+  error: string | null;
+  finished_at: Timestamp | null;
+  id: Generated<Int8>;
+  params: Generated<Json>;
+  requested_by: string;
+  result: Json | null;
+  started_at: Timestamp | null;
+  status: Generated<string>;
+  summary: string | null;
+}
+
+export interface KbJobFile {
+  bytes: Buffer;
+  content_type: string;
+  filename: string;
+  gzipped: boolean;
+  job_id: Int8;
+  size: Int8;
 }
 
 export interface KbListing {
@@ -311,6 +339,7 @@ export interface KbReviewItem {
 
 export interface KbReviewQueue {
   ai_decision_id: Int8 | null;
+  ai_run_id: Int8 | null;
   corrected_value: Json | null;
   country: string | null;
   created_at: Timestamp | null;
@@ -322,6 +351,7 @@ export interface KbReviewQueue {
   evidence: Json | null;
   evidence_id: Int8 | null;
   field: string | null;
+  from_ai: boolean | null;
   id: Int8 | null;
   in_queue: boolean | null;
   issue: string | null;
@@ -519,6 +549,8 @@ export interface StagingRawListing {
 export interface DB {
   "kb.ai_decision": KbAiDecision;
   "kb.ai_run": KbAiRun;
+  "kb.job": KbJob;
+  "kb.job_file": KbJobFile;
   "kb.listing": KbListing;
   "kb.listing_cluster": KbListingCluster;
   "kb.listing_standardized": KbListingStandardized;

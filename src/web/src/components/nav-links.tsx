@@ -7,6 +7,8 @@ import { cn } from "cn";
 const LINKS = [
   { href: "/cola", label: "Cola" },
   { href: "/decisiones", label: "Decisiones" },
+  { href: "/tareas", label: "Tareas" },
+  { href: "/estado", label: "Estado" },
 ] as const;
 
 /** The menu, highlighting the current section. The pathname is request data, so the header

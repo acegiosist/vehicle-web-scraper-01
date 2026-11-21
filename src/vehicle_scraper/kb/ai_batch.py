@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 MODEL = "claude-opus-5-5"
 # Message Batches = 50 % of standard Opus 5.5 prices ($4 / $20 per MTok).
 PRICE_IN, PRICE_OUT, PRICE_CACHE_READ = 2.0 / 1e6, 10.0 / 1e6, 0.10 / 1e6
+PRICE_CACHE_WRITE = PRICE_IN * 1.25          # 5-minute cache writes: 1.25x the input price
 MODELS_PER_REQUEST = 120
 VARIANTS_PER_REQUEST = 10
 MIN_AI_CONFIDENCE = 0.6
@@ -187,6 +188,13 @@ def estimate(reqs: list[dict], kind: str, count_tokens: bool = False) -> dict:
             "cost_usd_est": round(cost, 2), "cost_usd_range": [round(cost * 0.6, 2), round(cost * 1.8, 2)]}
 
 
+def actual_cost(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> float:
+    """What a collected batch cost, from the usage of its results (input_tokens excludes the
+    cached and cache-written tokens, as the API reports them)."""
+    return round(input_tokens * PRICE_IN + output_tokens * PRICE_OUT + cache_read * PRICE_CACHE_READ
+                 + cache_write * PRICE_CACHE_WRITE, 4)
+
+
 # --- submit / collect -------------------------------------------------------------------------------
 def submit(conn, reqs: list[dict], kind: str, effort: str, est: dict) -> int:
     import anthropic
@@ -247,7 +255,7 @@ def collect(conn, run_id: Optional[int], wait: bool = False) -> dict:
 def store_and_apply(conn, run: dict, results: list[dict]) -> dict:
     """Store each result (keyed by custom_id: batch results arrive in any order) and apply."""
     stats = Counter()
-    tin = tout = tcache = 0
+    tin = tout = tcache = twrite = 0
     for res in results:
         dec = conn.execute("SELECT * FROM kb.ai_decision WHERE ai_run_id = %s AND custom_id = %s",
                            (run["id"], res["custom_id"])).fetchone()
@@ -260,6 +268,7 @@ def store_and_apply(conn, run: dict, results: list[dict]) -> dict:
             tin += u.get("input_tokens") or 0
             tout += u.get("output_tokens") or 0
             tcache += u.get("cache_read_input_tokens") or 0
+            twrite += u.get("cache_creation_input_tokens") or 0
         result_type = res["type"] if (res["type"] != "succeeded" or data is not None) else "unparseable"
         conn.execute("UPDATE kb.ai_decision SET response = %s, result_type = %s, stop_reason = %s WHERE id = %s",
                      (jsonb(data) if data is not None else None, result_type, stop, dec["id"]))
@@ -269,7 +278,8 @@ def store_and_apply(conn, run: dict, results: list[dict]) -> dict:
             (apply_identity if run["kind"] == "identity" else apply_specs)(conn, dec["id"], meta, data, stats)
             conn.execute("UPDATE kb.ai_decision SET applied = true WHERE id = %s", (dec["id"],))
     conn.execute("""UPDATE kb.ai_run SET status = 'applied', ended_at = now(), input_tokens = %s, output_tokens = %s,
-                    cache_read_tokens = %s WHERE id = %s""", (tin, tout, tcache, run["id"]))
+                    cache_read_tokens = %s, cache_write_tokens = %s, actual_cost_usd = %s WHERE id = %s""",
+                 (tin, tout, tcache, twrite, actual_cost(tin, tout, tcache, twrite), run["id"]))
     return dict(stats)
 
 
@@ -343,34 +353,3 @@ def apply_specs(conn, decision_id: int, meta: dict, data: dict, stats: Counter) 
                         country="" if s.get("field") in MECH_FIELDS else country, issue="ai_suspect_known",
                         source="ai", kind="individual", proposed=s, ai_decision_id=decision_id)
             stats["suspect_known"] += 1
-
-
-# --- CLI ---------------------------------------------------------------------------------------------
-def run_cli(conn, args) -> int:
-    kind = "identity" if args.kb_cmd == "ai-identity" else "specs"
-    if args.collect:
-        print(collect(conn, args.run_id))
-        print("Next: kb review export")
-        return 0
-    makes = {m.strip().lower() for m in args.makes.split(",")} if args.makes else None
-    reqs = identity_requests(conn, makes) if kind == "identity" else specs_requests(conn, args.min_listings, makes)
-    reqs = _with_params(reqs, kind, args.effort)
-    reqs, skipped = _drop_answered(conn, reqs)
-    if args.limit:
-        reqs = reqs[:args.limit]
-    if not reqs:
-        print(f"Nothing to send ({skipped} requests already answered).")
-        return 0
-    est = estimate(reqs, kind, getattr(args, "count_tokens", False))
-    print(f"{kind}: {est['requests']} requests ({skipped} already answered, not resent), "
-          f"~{est['input_tokens']:,} input tokens [{est['method']}], ~{est['output_tokens_est']:,} output+thinking tokens")
-    print(f"Estimated cost (Batch, {MODEL}, effort={args.effort}): US${est['cost_usd_est']} "
-          f"(range US${est['cost_usd_range'][0]}-{est['cost_usd_range'][1]})")
-    if args.estimate:
-        return 0
-    if not args.confirm:
-        print("Not sent: --submit spends money. Re-run with --submit --confirm once the estimate is approved.")
-        return 2
-    run_id = submit(conn, reqs, kind, args.effort, est)
-    print(f"Submitted ai_run {run_id}. Collect with: kb {args.kb_cmd} --collect --run-id {run_id}")
-    return 0

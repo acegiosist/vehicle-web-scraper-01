@@ -36,6 +36,13 @@ export function QueueTable({ rows, filters }: { rows: QueueRow[]; filters: Queue
                 <div className="text-xs text-muted-foreground">
                   {ENTITY_LABELS[r.entity_type as EntityType] ?? r.entity_type} #{r.id}
                 </div>
+                {/* visible text, not a title tooltip: the row-wide link covers the cell, so a
+                    hover tooltip never shows (and touch screens have no hover) */}
+                {r.from_ai ? (
+                  <div className="text-xs font-medium text-primary">
+                    Propuesta de la IA (corrida #{r.ai_run_id ?? "?"}): necesita tu revisión
+                  </div>
+                ) : null}
               </TableCell>
               <TableCell className="whitespace-normal">
                 {issueInfo(r.issue).title}
@@ -45,6 +52,7 @@ export function QueueTable({ rows, filters }: { rows: QueueRow[]; filters: Queue
               <TableCell className="text-right tabular-nums">{formatInt(r.listings_affected)}</TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">
+                  {r.from_ai ? <Badge>IA</Badge> : null}
                   {r.queued_decision_id ? <Badge variant="secondary">En cola</Badge> : null}
                   {r.kind === "sample" ? <Badge variant="outline">Muestra</Badge> : null}
                   {!r.queued_decision_id && r.kind !== "sample" ? (

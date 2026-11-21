@@ -19,6 +19,7 @@ function applyFilters(q: QueueQuery, f: QueueFilters): QueueQuery {
   if (f.issue) q = q.where("issue", "=", f.issue);
   if (f.entity) q = q.where("entity_type", "=", f.entity);
   if (f.kind) q = q.where("kind", "=", f.kind);
+  if (f.origin) q = q.where("from_ai", "=", f.origin === "ai");
   if (f.make) q = q.where("make_name", "=", f.make);
   if (f.country) q = q.where("country", "=", f.country);
   if (f.q) {
@@ -58,6 +59,8 @@ export async function listQueue(filters: QueueFilters) {
         "listings_affected",
         "queued_decision_id",
         "review_batch_id",
+        "from_ai",
+        "ai_run_id",
       ])
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE)

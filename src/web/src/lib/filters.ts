@@ -18,6 +18,8 @@ export const queueFiltersSchema = z.object({
   issue: optional(z.string().refine((s) => Object.hasOwn(ISSUES, s))),
   entity: optional(z.enum(["make", "model", "trim", "listing", "variant", "spec"])),
   kind: optional(z.enum(["individual", "sample"])),
+  /** ai: the proposal came from a Claude batch (review_queue.from_ai); rules: everything else */
+  origin: optional(z.enum(["ai", "rules"])),
   make: optional(z.string().max(80)),
   country: optional(z.string().regex(/^[A-Z]{2}$/)),
   q: optional(z.string().max(100)),

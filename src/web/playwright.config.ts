@@ -34,7 +34,9 @@ export default defineConfig({
       name: "web",
       command: `pnpm build && pnpm exec next start -H 127.0.0.1 -p ${PORT}`,
       url: `http://127.0.0.1:${PORT}/cola`,
-      env: { REVIEW_WEB_DATABASE_URL: e2eUrl },
+      // overrides .env.local. The send form is shown, but nothing can be sent: the e2e worker has
+      // KB_ALLOW_WEB_AI_SUBMIT off and a spending limit the seed already exceeded.
+      env: { REVIEW_WEB_DATABASE_URL: e2eUrl, KB_WEB_AI_SUBMIT: "true" },
       timeout: 300_000,
     },
   ],

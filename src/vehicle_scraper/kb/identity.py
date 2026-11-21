@@ -183,7 +183,9 @@ def open_review(conn, *, level: int, entity_type: str, entity_id: int, issue: st
                 current=None, evidence=None, listings: int = 0, ai_decision_id=None,
                 evidence_id=None) -> bool:
     """Open a review case unless the same one is already open (re-runs never duplicate).
-    An open case gets its proposal/evidence refreshed."""
+    An open case gets its proposal/evidence refreshed. A case the AI answered keeps its AI source
+    and review kind when the rules re-open it (``normalize`` after the results were collected):
+    otherwise every recalculation would hide where the proposal came from and undo the sampling."""
     row = conn.execute(
         """INSERT INTO kb.review_item (level, entity_type, entity_id, country, field, issue, proposed,
                                        current, evidence, source, kind, listings_affected,
@@ -192,7 +194,10 @@ def open_review(conn, *, level: int, entity_type: str, entity_id: int, issue: st
            ON CONFLICT (entity_type, entity_id, country, field, issue) WHERE status = 'pending'
            DO UPDATE SET proposed = COALESCE(EXCLUDED.proposed, kb.review_item.proposed),
                          evidence = EXCLUDED.evidence, listings_affected = EXCLUDED.listings_affected,
-                         kind = EXCLUDED.kind, source = EXCLUDED.source,
+                         kind = CASE WHEN EXCLUDED.ai_decision_id IS NULL AND kb.review_item.ai_decision_id IS NOT NULL
+                                     THEN kb.review_item.kind ELSE EXCLUDED.kind END,
+                         source = CASE WHEN EXCLUDED.ai_decision_id IS NULL AND kb.review_item.ai_decision_id IS NOT NULL
+                                       THEN kb.review_item.source ELSE EXCLUDED.source END,
                          ai_decision_id = COALESCE(EXCLUDED.ai_decision_id, kb.review_item.ai_decision_id),
                          evidence_id = COALESCE(EXCLUDED.evidence_id, kb.review_item.evidence_id)
            RETURNING (xmax = 0) AS inserted""",

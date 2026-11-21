@@ -39,7 +39,7 @@ async function Queue({ searchParams }: Pick<PageProps<"/cola">, "searchParams">)
         <h2 id="queue-heading" className="text-sm text-muted-foreground">
           {list.total === 0
             ? "No hay casos con estos filtros."
-            : `${list.total.toLocaleString("es")} casos · página ${list.page} de ${list.pageCount}`}
+            : `${list.total.toLocaleString("es")} ${list.total === 1 ? "caso" : "casos"} · página ${list.page} de ${list.pageCount}`}
         </h2>
         {list.rows.length > 0 && <QueueTable rows={list.rows} filters={filters} />}
         <Pagination page={list.page} pageCount={list.pageCount} href={(page) => queueHref(filters, { page })} />

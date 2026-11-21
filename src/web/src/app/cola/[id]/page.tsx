@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { fieldLabel, FIELDS, formatValue, isField } from "@/lib/fields";
 import { caseHref, parseQueueFilters, queueHref } from "@/lib/filters";
-import { formatDate, formatInt } from "@/lib/format";
+import { formatDate, formatInt, formatPercent } from "@/lib/format";
 import {
   allowedDecisions,
   DECISION_LABELS,
@@ -82,6 +82,7 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{levelLabel(item.level)}</Badge>
           <Badge variant="secondary">{info.title}</Badge>
+          {item.from_ai && <Badge>Propuesta de la IA · corrida #{item.ai_run_id ?? "?"}</Badge>}
           {item.kind === "sample" && <Badge variant="outline">Muestra del lote {item.review_batch_id}</Badge>}
           {!pending && <Badge>{statusLabel(item.status)}</Badge>}
         </div>
@@ -98,10 +99,14 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div className="min-w-0 space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
+            <Card className={item.from_ai ? "ring-2 ring-primary/40" : undefined}>
               <CardHeader>
-                <CardTitle>Propuesta</CardTitle>
-                <CardDescription>Lo que propone {item.source === "ai" ? "la IA" : "la regla"}</CardDescription>
+                <CardTitle>{item.from_ai ? "Propuesta de la IA" : "Propuesta"}</CardTitle>
+                <CardDescription>
+                  {item.from_ai
+                    ? `Corrida #${item.ai_run_id ?? "?"} de Claude${confidenceText(item.proposed)}. Nada de la IA se acepta sin tu revisión.`
+                    : "Lo que propone la regla"}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <KeyValues data={item.proposed} field={field} />
@@ -218,6 +223,12 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
       </div>
     </div>
   );
+}
+
+/** ", confianza 60 %" when the AI proposal carries a confidence (0..1). */
+function confidenceText(proposed: unknown): string {
+  const c = proposed && typeof proposed === "object" ? (proposed as Record<string, unknown>).confidence : undefined;
+  return typeof c === "number" && c >= 0 && c <= 1 ? `, confianza ${formatPercent(c)}` : "";
 }
 
 function statusLabel(status: string | null): string {

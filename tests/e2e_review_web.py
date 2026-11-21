@@ -7,6 +7,7 @@ migrates it, loads a handful of listings that open known review cases, and then 
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -19,8 +20,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import psycopg  # noqa: E402
 
-from vehicle_scraper.kb import consensus, identity, importer  # noqa: E402
+from vehicle_scraper.kb import ai_batch, consensus, identity, importer  # noqa: E402
 from vehicle_scraper.kb.db import connect  # noqa: E402
+from vehicle_scraper.kb import settings, worker  # noqa: E402
 from vehicle_scraper.kb.worker import WorkerSettings, run_worker  # noqa: E402
 from vehicle_scraper.models import VehicleRecord  # noqa: E402
 from vehicle_scraper.storage import Storage  # noqa: E402
@@ -40,6 +42,19 @@ def records() -> list[VehicleRecord]:
                 seats=5 if i <= 3 else 7, horsepower_hp=138) for i in range(1, 7)]
     rows += [rec("z1", "Zzzmotors", "Thing")]                                          # unknown make
     return rows
+
+
+def fake_ai_answer(conn) -> None:
+    """A collected identity batch (no network, no cost) that proposes the make Zzzmotors: its case
+    shows up as an AI proposal on the site. Its model is left to the rules."""
+    reqs = ai_batch._with_params(ai_batch.identity_requests(conn), "identity", "low")
+    req = next(r for r in reqs if r["meta"].get("make_unresolved"))
+    run = ai_batch.record_submission(conn, [req], "identity", "low", {"cost_usd_est": 0}, "msgbatch_e2e")
+    answer = {"make": {"canonical_name": "Zzzmotors", "is_vehicle_make": True, "status": "ok", "confidence": 0.7,
+                       "reason": "Marca de prueba"}, "models": [], "trims": []}
+    msg = {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(answer)}], "usage": {}}
+    ai_batch.store_and_apply(conn, conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone(),
+                             [{"custom_id": req["custom_id"], "type": "succeeded", "message": msg}])
 
 
 def main() -> int:
@@ -62,6 +77,15 @@ def main() -> int:
             importer.import_sqlite(conn, path)
             identity.normalize(conn)
             consensus.consolidate(conn)
+            fake_ai_answer(conn)
+            conn.execute("""INSERT INTO kb.ai_run (kind, batch_id, model, effort, status, submitted_at, est_cost_usd)
+                            VALUES ('specs', 'msgbatch_e2e_spent', 'claude-opus-5-5', 'medium', 'submitted',
+                                    now(), 2)""")               # US$2 spent today: over the US$1 budget
+    # never send a real batch from the tests: ignore the repo's .env (KB_ALLOW_WEB_AI_SUBMIT stays
+    # off) and give the worker a US$1 daily budget that the seed has already exceeded
+    settings.ENV_FILE = ""
+    os.environ.pop(worker.AI_SUBMIT_ENV, None)
+    os.environ["KB_AI_BUDGET_USD"], os.environ["KB_AI_BUDGET_PERIOD"] = "1", "daily"
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     return run_worker(url, WorkerSettings(propagate_idle=0, poll=2))   # logs "listening on ..." when ready
 

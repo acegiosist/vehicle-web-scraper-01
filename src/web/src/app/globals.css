@@ -49,6 +49,9 @@
 }
 
 :root {
+  /* native controls (select dropdowns, checkboxes, scrollbars) follow the system theme,
+     like the colors below. Declared once: Lightning CSS rewrites color-scheme inside @media. */
+  color-scheme: light dark;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

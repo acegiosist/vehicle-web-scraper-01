@@ -240,7 +240,7 @@ def test_merging_models_cascades(db, tmp_path):
 
 
 # --- review website: decision inbox + worker (migration 0002) ------------------------------------
-from vehicle_scraper.kb import worker  # noqa: E402
+from vehicle_scraper.kb import settings, worker  # noqa: E402
 from vehicle_scraper.kb.db import writer_lock  # noqa: E402
 
 
@@ -267,6 +267,36 @@ def test_review_queue_view_labels_and_listing_number(db, tmp_path):
         assert q["listings_disagree"]["make_name"] == "Chevrolet" and q["listings_disagree"]["variant_id"]
         n = conn.execute("SELECT kb.listing_number('carroya', 'tr1') AS n").fetchone()["n"]
         assert n == identity.listing_number("carroya", "tr1")
+
+
+def test_ai_cases_keep_their_origin_when_normalize_runs_again(db, tmp_path):
+    import json
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", [rec("carroya", 20, "Zzzmotors", "Thing")]))
+    with connect(db) as conn:
+        reqs = ai_batch._with_params(ai_batch.identity_requests(conn), "identity", "low")
+        req = next(r for r in reqs if r["meta"].get("make_unresolved"))
+        model_id = req["meta"]["models"][0]
+        run = ai_batch.record_submission(conn, [req], "identity", "low", {"cost_usd_est": 0}, "msgbatch_test")
+        answer = {"make": {"canonical_name": "Zzzmotors", "is_vehicle_make": True, "status": "ok", "confidence": 0.9},
+                  "models": [{"id": model_id, "status": "ok", "is_real_model": True, "confidence": 0.9}],  # sampled
+                  "trims": []}
+        msg = {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(answer)}], "usage": {}}
+        ai_batch.store_and_apply(conn, conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone(),
+                                 [{"custom_id": req["custom_id"], "type": "succeeded", "message": msg}])
+        identity.normalize(conn)          # what the worker does after a decision: re-opens the same cases
+        cases = {r["issue"]: r for r in conn.execute(
+            "SELECT issue, source, kind, from_ai, ai_run_id FROM kb.review_queue WHERE status = 'pending'")}
+        assert (cases["unresolved_make"]["source"], cases["unresolved_make"]["kind"]) == ("ai", "individual")
+        assert (cases["unresolved_model"]["source"], cases["unresolved_model"]["kind"]) == ("ai", "sample")
+        assert all(c["from_ai"] and c["ai_run_id"] == run for c in cases.values())
+        # cases broken before migration 0004 (source reset to 'rule') get their origin back
+        conn.execute("UPDATE kb.review_item SET source = 'rule' WHERE ai_decision_id IS NOT NULL")
+    _alembic(db, "downgrade", "0003_web_jobs")
+    _alembic(db, "upgrade", "head")
+    with connect(db) as conn:
+        assert {r["source"] for r in conn.execute(
+            "SELECT source FROM kb.review_item WHERE ai_decision_id IS NOT NULL")} == {"ai"}
+        assert conn.execute("SELECT count(*) AS n FROM kb.review_queue WHERE NOT from_ai").fetchone()["n"] == 0
 
 
 def test_worker_applies_queued_decisions(db, tmp_path):
@@ -339,3 +369,147 @@ def test_csv_import_reports_invalid_corrections(db, tmp_path):
     with connect(db) as conn:
         assert review.import_review(conn, out, "tester")["invalid_value"] == 1
         assert conn.execute("SELECT status FROM kb.review_item WHERE id = %s", (case,)).fetchone()["status"] == "pending"
+
+
+# --- jobs queued by the review website (migration 0003) -----------------------------------------------
+import gzip  # noqa: E402
+
+from vehicle_scraper.kb import ai_batch as _ab  # noqa: E402
+
+
+def _job(conn, command, params=None, by="ana"):
+    return conn.execute("INSERT INTO kb.job (command, params, requested_by) VALUES (%s, %s, %s) RETURNING id",
+                        (command, jsonb(params or {}), by)).fetchone()["id"]
+
+
+def _jobs(url):
+    with connect(url) as conn:
+        return {r["id"]: r for r in conn.execute("SELECT * FROM kb.job")}
+
+
+def test_jobs_recalculate_and_export(db, tmp_path):
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", [tracker(i, horsepower_hp=138) for i in range(1, 6)]))
+    with connect(db) as conn:
+        j_rec = _job(conn, "recalculate")
+        j_csv = _job(conn, "export", {"format": "csv"})
+        j_bad = _job(conn, "export", {"format": "pdf"})
+        j_xlsx = _job(conn, "export", {"format": "xlsx", "with_sources": True})
+        with pytest.raises(psycopg.errors.UniqueViolation):          # same job twice while queued
+            with conn.transaction():
+                _job(conn, "recalculate")
+    assert worker.run_worker(db, worker.WorkerSettings(propagate_idle=0), once=True) == 0
+    jobs = _jobs(db)
+    assert [jobs[j]["status"] for j in (j_rec, j_csv, j_bad, j_xlsx)] == ["done", "done", "failed", "done"]
+    assert "consolidate" in jobs[j_rec]["summary"] and jobs[j_rec]["result"]["consolidate"]["variants"] == 1
+    assert "csv, xlsx or json" in jobs[j_bad]["error"]
+    with connect(db) as conn:
+        f = conn.execute("SELECT * FROM kb.job_file WHERE job_id = %s", (j_csv,)).fetchone()
+        text = gzip.decompress(f["bytes"]).decode("utf-8-sig")
+        assert f["gzipped"] and f["filename"] == "kb_listings.csv" and f["size"] == len(gzip.decompress(f["bytes"]))
+        assert text.splitlines()[0].startswith("source_site") and len(text.splitlines()) == 6
+        x = conn.execute("SELECT * FROM kb.job_file WHERE job_id = %s", (j_xlsx,)).fetchone()
+        assert not x["gzipped"] and bytes(x["bytes"][:2]) == b"PK" and x["filename"] == "kb_listings_sources.xlsx"
+
+
+def test_cancel_and_interrupted_jobs(db):
+    with connect(db) as conn:
+        queued, running = _job(conn, "normalize"), _job(conn, "consolidate")
+        conn.execute("UPDATE kb.job SET status = 'running' WHERE id = %s", (running,))
+        assert conn.execute("SELECT kb.cancel_job(%s) AS ok", (queued,)).fetchone()["ok"] is True
+        assert conn.execute("SELECT kb.cancel_job(%s) AS ok", (running,)).fetchone()["ok"] is None
+    worker.run_worker(db, worker.WorkerSettings(propagate_idle=0), once=True)
+    jobs = _jobs(db)
+    assert jobs[queued]["status"] == "canceled"
+    assert jobs[running]["status"] == "failed" and "se detuvo" in jobs[running]["error"]
+
+
+def test_ai_submit_from_the_site_needs_every_check(db, tmp_path, monkeypatch):
+    rows = [tracker(i) for i in range(1, 6)] + [rec("carroya", "u1", "Toyota", "Corola")]   # weak model -> AI
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", rows))
+    sent = []
+
+    def fake_submit(conn, reqs, kind, effort, est):                  # no network, no cost
+        sent.append(len(reqs))
+        return _ab.record_submission(conn, reqs, kind, effort, est, f"msgbatch_fake_{len(sent)}")
+    monkeypatch.setattr(worker, "_submit_fn", fake_submit)
+    env = tmp_path / ".env"                       # the worker re-reads this file on every submission
+    env.write_text("KB_ALLOW_WEB_AI_SUBMIT=\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "ENV_FILE", str(env))
+    monkeypatch.setenv(worker.AI_SUBMIT_ENV, "true")  # the .env value wins over the environment
+    for key in ("KB_AI_BUDGET_USD", "KB_AI_BUDGET_PERIOD"):   # loaded from the repo's .env at import
+        monkeypatch.delenv(key, raising=False)
+
+    with connect(db) as conn:
+        est = _job(conn, "ai_estimate", {"kind": "identity"})
+    worker.run_next_job(db)
+    e = _jobs(db)[est]
+    assert e["status"] == "done" and e["result"]["requests"] >= 1 and len(e["result"]["fingerprint"]) == 64
+    cost = e["result"]["estimate"]["cost_usd_est"]
+
+    def submit(confirm, by):
+        with connect(db) as conn:
+            jid = _job(conn, "ai_submit", {"estimate_job_id": est, "confirm_usd": confirm}, by)
+        worker.run_next_job(db)
+        return _jobs(db)[jid]
+
+    assert "deshabilitado" in submit(cost, "a")["error"]                       # 1. flag off
+    env.write_text("KB_ALLOW_WEB_AI_SUBMIT=true\n", encoding="utf-8")         # switched on, no restart
+    assert "menor" in submit(cost - 0.01, "b")["error"]                        # 4. amount below the estimate
+    with connect(db) as conn:                                                  # 3. requests changed
+        conn.execute("UPDATE kb.job SET result = jsonb_set(result, '{fingerprint}', '\"x\"') WHERE id = %s", (est,))
+    assert "changed since the estimate" in submit(cost, "c")["error"]
+    with connect(db) as conn:                                                  # 2. estimate too old
+        conn.execute("UPDATE kb.job SET finished_at = now() - interval '2 hours' WHERE id = %s", (est,))
+    assert "minutos" in submit(cost, "d")["error"]
+    assert sent == []
+
+    def fresh_estimate():
+        with connect(db) as conn:
+            jid = _job(conn, "ai_estimate", {"kind": "identity", "effort": "low"})
+        worker.run_next_job(db)
+        return jid
+
+    est = fresh_estimate()                                                     # 5. the spending limit
+    assert "falta KB_AI_BUDGET_USD" in submit(cost, "e")["error"]              # no limit in .env: never sent
+    with connect(db) as conn:      # already spent today (an older run that is still being processed)
+        conn.execute("""INSERT INTO kb.ai_run (kind, batch_id, model, effort, status, submitted_at, est_cost_usd)
+                        VALUES ('specs', 'msgbatch_old', 'm', 'low', 'submitted', now(), 4.5),
+                               ('specs', 'msgbatch_last_month', 'm', 'low', 'applied', now() - interval '40 days', 90)""")
+    env.write_text("KB_ALLOW_WEB_AI_SUBMIT=true\nKB_AI_BUDGET_USD=4\n", encoding="utf-8")
+    est = fresh_estimate()
+    b = _jobs(db)[est]["result"]["budget"]
+    assert (b["limit_usd"], b["spent_usd"], b["allows"]) == (4.0, 4.5, False) and "Se superó" in b["message"]
+    assert "Se superó el límite de gasto en IA" in submit(cost, "f")["error"]
+    assert sent == []
+    env.write_text("KB_ALLOW_WEB_AI_SUBMIT=true\nKB_AI_BUDGET_USD=5\nKB_AI_BUDGET_PERIOD=daily\n", encoding="utf-8")
+    est = fresh_estimate()                       # last month's US$90 doesn't count today
+    assert _jobs(db)[est]["result"]["budget"]["allows"] is (4.5 + cost <= 5)
+    ok = submit(cost, "g")
+    assert ok["status"] == "done" and ok["result"]["ai_run_id"] and sent == [ok["result"]["requests"]]
+    with connect(db) as conn:
+        assert conn.execute("SELECT batch_id FROM kb.ai_run ORDER BY id DESC").fetchone()["batch_id"] == "msgbatch_fake_1"
+
+
+def test_collected_runs_keep_their_real_cost(db, tmp_path):
+    import json
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", [rec("carroya", 20, "Zzzmotors", "Thing")]))
+    with connect(db) as conn:
+        req = ai_batch._with_params(ai_batch.identity_requests(conn), "identity", "low")[0]
+        run = ai_batch.record_submission(conn, [req], "identity", "low", {"cost_usd_est": 0.5}, "msgbatch_test")
+        msg = {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps({"models": []})}],
+               "usage": {"input_tokens": 1000, "output_tokens": 2000, "cache_read_input_tokens": 3000,
+                         "cache_creation_input_tokens": 4000}}
+        ai_batch.store_and_apply(conn, conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone(),
+                                 [{"custom_id": req["custom_id"], "type": "succeeded", "message": msg}])
+        r = conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone()
+        expected = ai_batch.actual_cost(1000, 2000, 3000, 4000)
+        assert (r["cache_write_tokens"], float(r["actual_cost_usd"])) == (4000, expected)
+        assert expected == round(1000 * 2e-6 + 2000 * 10e-6 + 3000 * 0.1e-6 + 4000 * 2.5e-6, 4)
+        from vehicle_scraper.kb.budget import spent_since
+        assert spent_since(conn, r["submitted_at"]) == expected                # real cost, not the estimate
+    # runs collected before 0005 get their real cost from the tokens they had (no cache writes)
+    _alembic(db, "downgrade", "0004_queue_ai_origin")
+    _alembic(db, "upgrade", "head")
+    with connect(db) as conn:
+        r = conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone()
+        assert float(r["actual_cost_usd"]) == ai_batch.actual_cost(1000, 2000, 3000, 0)
