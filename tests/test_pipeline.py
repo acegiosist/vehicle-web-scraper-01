@@ -122,6 +122,16 @@ def test_max_age_filters_on_listing_date(dated):
     assert "b" not in _DatedScraper.fetched            # known-old at discovery: never fetched
 
 
+def test_max_age_cutoff_is_passed_to_the_scraper(dated, monkeypatch):
+    seen = []
+    orig = _DatedScraper.discover
+    monkeypatch.setattr(_DatedScraper, "discover", lambda self, limit=None: (seen.append(self.listed_since),
+                                                                             orig(self, limit))[1])
+    since = NOW - cli.parse_max_age("5")
+    cli.run_site("dated", dated, limit=None, refresh=False, listed_since=since)
+    assert seen == [since]                             # newest-first scrapers may stop paging there
+
+
 def test_max_age_limit_counts_only_recent_listings(dated):
     # a plain --limit 2 would stop after a, b; with the filter it keeps going until 2 pass
     stats = cli.run_site("dated", dated, limit=2, refresh=False, listed_since=NOW - cli.parse_max_age("1y"))

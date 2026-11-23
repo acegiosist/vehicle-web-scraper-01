@@ -58,6 +58,7 @@ def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
     except RuntimeError as e:                     # e.g. missing API token
         log.error("[%s] %s", name, e)
         return stats | {"status": f"not configured: {e}"}
+    scraper.listed_since = listed_since           # lets newest-first discovery stop early
     raw_dir = settings.data_dir / "raw" / name
     passed = 0                                    # listings that got past the age filter
     try:
