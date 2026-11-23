@@ -6,6 +6,7 @@ import { cn } from "cn";
 
 const LINKS = [
   { href: "/cola", label: "Cola" },
+  { href: "/base", label: "Base" },
   { href: "/decisiones", label: "Decisiones" },
   { href: "/tareas", label: "Tareas" },
   { href: "/estado", label: "Estado" },

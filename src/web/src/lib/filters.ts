@@ -32,23 +32,26 @@ export function parseQueueFilters(params: Record<string, string | string[] | und
   return queueFiltersSchema.parse(params);
 }
 
-/** Query string for the queue, with some filters replaced (``undefined`` removes one). */
-export function queueHref(filters: QueueFilters, changes: Partial<QueueFilters> = {}): string {
-  const merged = { ...filters, ...changes };
+/** ``path`` plus the filters as a query string (no empty values, no ``page=1``). */
+function withQuery(path: string, filters: Record<string, unknown>, dropPage = false): string {
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(merged)) {
-    if (v !== undefined && v !== null && v !== "" && !(k === "page" && v === 1)) qs.set(k, String(v));
+  for (const [k, v] of Object.entries(filters)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (k === "page" && (dropPage || v === 1)) continue;
+    qs.set(k, String(v));
   }
   const s = qs.toString();
-  return s ? `/cola?${s}` : "/cola";
+  return s ? `${path}?${s}` : path;
+}
+
+/** Query string for the queue, with some filters replaced (``undefined`` removes one). */
+export function queueHref(filters: QueueFilters, changes: Partial<QueueFilters> = {}): string {
+  return withQuery("/cola", { ...filters, ...changes });
 }
 
 /** A case page that remembers the queue filters (for "next case" and "back to the queue"). */
 export function caseHref(id: string, filters: QueueFilters): string {
-  const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(filters)) if (v !== undefined && k !== "page") qs.set(k, String(v));
-  const s = qs.toString();
-  return `/cola/${id}${s ? `?${s}` : ""}`;
+  return withQuery(`/cola/${id}`, filters, true);
 }
 
 /** ILIKE pattern for free text, with the user's % and _ taken literally. */
@@ -66,4 +69,31 @@ export type DecisionFilters = z.infer<typeof decisionFiltersSchema>;
 
 export function parseDecisionFilters(params: Record<string, string | string[] | undefined>): DecisionFilters {
   return decisionFiltersSchema.parse(params);
+}
+
+/** Database ids (bigint) travel as digit strings. */
+export const ID_PATTERN = /^\d{1,18}$/;
+
+// Knowledge base browser (/base): make and model by id (names repeat across makes), model year.
+export const knowledgeFiltersSchema = z.object({
+  make: optional(z.string().regex(ID_PATTERN)),
+  model: optional(z.string().regex(ID_PATTERN)),
+  year: optional(z.coerce.number().int().min(1900).max(2100)),
+  page: optional(z.coerce.number().int().min(1).max(10_000)),
+});
+
+export type KnowledgeFilters = z.infer<typeof knowledgeFiltersSchema>;
+
+export function parseKnowledgeFilters(params: Record<string, string | string[] | undefined>): KnowledgeFilters {
+  return knowledgeFiltersSchema.parse(params);
+}
+
+/** The knowledge base list, with some filters replaced (``undefined`` removes one). */
+export function knowledgeHref(filters: KnowledgeFilters, changes: Partial<KnowledgeFilters> = {}): string {
+  return withQuery("/base", { ...filters, ...changes });
+}
+
+/** A variant's sheet that remembers the list filters (for "back to the knowledge base"). */
+export function variantHref(id: string, filters: KnowledgeFilters): string {
+  return withQuery(`/base/${id}`, filters, true);
 }

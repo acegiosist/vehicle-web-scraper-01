@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { caseHref, likePattern, parseDecisionFilters, parseQueueFilters, queueHref } from "./filters";
+import {
+  caseHref,
+  knowledgeHref,
+  likePattern,
+  parseDecisionFilters,
+  parseKnowledgeFilters,
+  parseQueueFilters,
+  queueHref,
+  variantHref,
+} from "./filters";
 
 describe("parseQueueFilters", () => {
   it("keeps valid values and drops anything else", () => {
@@ -58,6 +67,31 @@ describe("hrefs", () => {
 describe("likePattern", () => {
   it("escapes LIKE wildcards typed by the user", () => {
     expect(likePattern("50%_off")).toBe("%50\\%\\_off%");
+  });
+});
+
+describe("parseKnowledgeFilters", () => {
+  it("keeps numeric ids and a plausible year", () => {
+    expect(parseKnowledgeFilters({ make: "12", model: "345", year: "2020", page: "2" })).toEqual({
+      make: "12",
+      model: "345",
+      year: 2020,
+      page: 2,
+    });
+  });
+
+  it("drops names, injections and out-of-range years", () => {
+    expect(parseKnowledgeFilters({ make: "Toyota", model: "1 OR 1=1", year: "20200", page: "0" })).toEqual({});
+    expect(parseKnowledgeFilters({ make: "1234567890123456789" })).toEqual({});
+  });
+});
+
+describe("knowledge hrefs", () => {
+  it("builds list and variant links without page 1 or empty filters", () => {
+    expect(knowledgeHref({ make: "3", page: 1 })).toBe("/base?make=3");
+    expect(knowledgeHref({ make: "3", model: "9" }, { page: 2 })).toBe("/base?make=3&model=9&page=2");
+    expect(knowledgeHref({ make: "3" }, { make: undefined })).toBe("/base");
+    expect(variantHref("42", { year: 2020, page: 5 })).toBe("/base/42?year=2020");
   });
 });
 

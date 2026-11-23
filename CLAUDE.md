@@ -185,7 +185,11 @@ worker claims one at a time (`running`, committed), runs `commands.py` under the
 commits the changes together with `done` + `summary`/`result` (exports go to `kb.job_file`, gzip
 for csv/json, last 10 kept); any error rolls back and marks it `failed`. The site can only cancel
 a queued job, through `kb.cancel_job()` (SECURITY DEFINER). `/estado` reads the same numbers as
-`kb status` directly. **Sending to Claude from the site** needs `KB_WEB_AI_SUBMIT=true` (site, shows
+`kb status` directly. `/base` browses the whole knowledge base read-only (every `kb.variant`,
+any status; filters make/model/year by id, LIMIT/OFFSET pagination); `/base/[id]` shows the
+published `variant_spec`/`variant_market_spec`, all `spec_evidence` (the published one picked with
+`lib/knowledge.ts:winningEvidence`, which mirrors `consensus.RANK`/`PUBLISHED` — keep them in sync),
+open cases, `spec_history` and listings. **Sending to Claude from the site** needs `KB_WEB_AI_SUBMIT=true` (site, shows
 the form) and `KB_ALLOW_WEB_AI_SUBMIT=true` (worker, the real guard); the worker also requires an
 `ai_estimate` job finished < 60 min ago, the same request fingerprint, and `confirm_usd` ≥ the
 estimate. The spending limit (`kb/budget.py`) applies on top, to the site and the CLI: the estimate
