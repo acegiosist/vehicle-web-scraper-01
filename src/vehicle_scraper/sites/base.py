@@ -52,6 +52,9 @@ class SiteScraper(ABC):
     status: str = "verified"              # verified | needs-token | blocked-by-site | unverified
     notes: str = ""
     extra_headers: dict = {}
+    # Set by `run --max-age` before discover(): the cutoff (UTC). run_site applies it either way;
+    # a scraper whose discovery is sorted newest-first may also use it to stop paging early.
+    listed_since: Optional[datetime] = None
 
     def __init__(self, cfg: Settings = default_settings, client: Optional[PoliteClient] = None):
         self.cfg = cfg

@@ -66,6 +66,8 @@ UTC), not on `model_year`. `discover()` sets it when known up front — CarroYa'
 the sitemap `<lastmod>` via `SiteScraper.sitemap_entries` — so old listings are skipped without
 fetching; `parse()` may overwrite it (TrueCar's page `listedAt`). Listings with no date at all
 aren't saved under `--max-age`, and `--limit` then counts only listings that pass.
+`run_site` also sets `scraper.listed_since` to the cutoff before `discover()`, so a site whose
+discovery is sorted newest-first (Driveway, by `inventoryDate`) stops paging once it reaches it.
 
 **Two ways a site is implemented**, both registered in a shared `REGISTRY` (`sites/base.py`):
 - A **dedicated scraper** (`sites/carroya.py`, `cofino.py`, `tucarro.py`, `chileautos.py`,
@@ -334,6 +336,10 @@ instead of `review export`/`import`, propagates by itself, and runs the jobs que
 - **chileautos.cl** (Chile) — blocked by a DataDome CAPTCHA on every page; scraper detects and
   skips it rather than solving the CAPTCHA.
 - **cars24.com** (India) — unverified; Cloudflare 403s from outside India, likely geo-restricted.
+- **driveway.com** (US) — unverified; uses the internal search API its own /shop page calls
+  (public frontend key, `DRIVEWAY_API_KEY` overrides), sorted newest-first with `inventoryDate`
+  as the listing date. One query pages through ~30k results at most, so big groups are split by
+  price. `--browser` adds specs/equipment from the rendered car page.
 
 ## Git Commit & Push Workflow
 When the user says "commit my changes" or "commit and push my changes", perform the following steps automatically:
