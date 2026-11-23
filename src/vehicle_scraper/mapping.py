@@ -35,7 +35,7 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("fuel_type", r"combustible|fuel ?(type)?$|tipo de alimentacion combustible|energia", r"tanque|tank|consumo|capacidad|economy"),
     ("fuel_tank_capacity_l", r"tanque|tank|deposito de combustible|capacidad de combustible", None),
     ("transmission_type", r"transmision|^caja|tipo de caja|gearbox|^box$|cambios$|transmission", r"cantidad de cambios|numero de cambios|velocidades"),
-    ("drivetrain", r"traccion|drivetrain|wheel drive|^drive$|tipo de traccion|sistema de traccion", r"control de traccion"),
+    ("drivetrain", r"traccion|drivetrain|wheel drive|^drive( type)?$|tipo de traccion|sistema de traccion", r"control de traccion"),
     ("seats", r"asientos|plazas|pasajeros|seats|seating|capacidad de personas|passenger",
      r"cuero|electric|calefact|ventil|memoria|abatib|plegab|fold|split|divid|fila|\brow|ajust|lumbar"
      r"|power|heat|cool|memory|leather|material|driver|conductor"
@@ -52,6 +52,7 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("mileage_km", r"kilometraje|kilometros|mileage|odometer|recorrido|^km$", None),
 ]
 _LABEL_RULES = [(f, re.compile(i), re.compile(e) if e else None) for f, i, e in LABEL_RULES]
+_CYLINDERS_ONLY_RE = re.compile(r"\s*\d{1,2}\s*-?\s*(cyl|cyls|cylinders?|cilindros?)\.?\s*")
 
 # ---------------------------------------------------------------------------
 # 2) Feature keyword patterns. Used for feature lists, boolean labels and text.
@@ -253,6 +254,8 @@ class RecordBuilder:
             field = "model_year"            # In Colombia "Modelo: 2010" means the year
         if field in _NUMERIC_FIELDS and N.to_bool(value) is not None:
             field = None                      # "Con airbags": "Sí" is a feature flag, not a count
+        if field == "engine_displacement_l" and _CYLINDERS_ONLY_RE.fullmatch(N.norm(value)):
+            field = "engine_cylinders"        # "Engine: 6 Cyl" is a cylinder count, not 6 litres
         if field == "airbags_count" and not re.search(r"\d", str(value)):
             field = None                      # "Side Airbags": "Front and Rear" is a location, not a count
         # Rim and tire sizes entered under each other's label: "Llantas: R16", "Rin: 245-60".

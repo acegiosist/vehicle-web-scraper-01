@@ -12,7 +12,18 @@ def test_labels_es_en():
     assert match_label("Control de tracción") is None
     assert match_label("Bolsas de aire") == "airbags_count"
     assert match_label("Wheel drive") == "drivetrain"
+    assert match_label("Drive Type") == "drivetrain"
     assert match_label("Puertas") == "doors"
+
+
+def test_engine_cylinder_count_is_not_displacement():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Engine", "6 Cyl")])                 # Driveway: a cylinder count, not 6 L
+    r = b.build()
+    assert r.engine_cylinders == 6 and r.engine_displacement_l is None
+    b = RecordBuilder("t", "u", "2")
+    b.add_pairs([("Engine", "2.0L 4 Cyl")])
+    assert b.build().engine_displacement_l == 2.0
 
 
 def test_features():
