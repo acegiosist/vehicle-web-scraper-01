@@ -185,7 +185,9 @@ worker claims one at a time (`running`, committed), runs `commands.py` under the
 commits the changes together with `done` + `summary`/`result` (exports go to `kb.job_file`, gzip
 for csv/json, last 10 kept); any error rolls back and marks it `failed`. The site can only cancel
 a queued job, through `kb.cancel_job()` (SECURITY DEFINER). `/estado` reads the same numbers as
-`kb status` directly. `/base` browses the whole knowledge base read-only (every `kb.variant`,
+`kb status` directly. The layout shows `AiRunNotice` on every page: runs `ended` (with "Recoger
+resultados", an `ai_collect` job) and `submitted` ones (refreshed every minute while processing);
+`/tareas` lists the latest runs. `/base` browses the whole knowledge base read-only (every `kb.variant`,
 any status; filters make/model/year by id, LIMIT/OFFSET pagination); `/base/[id]` shows the
 published `variant_spec`/`variant_market_spec`, all `spec_evidence` (the published one picked with
 `lib/knowledge.ts:winningEvidence`, which mirrors `consensus.RANK`/`PUBLISHED` — keep them in sync),
@@ -219,7 +221,8 @@ in pipeline order:
   (default `head`). `--downgrade base` drops the `staging` and `kb` schemas. Revisions:
   `0001_kb_schema`, `0002_review_web` (decision inbox, `review_queue` view), `0003_web_jobs`
   (`job`, `job_file`, `cancel_job()`), `0004_queue_ai_origin` (`review_queue.from_ai`/`ai_run_id`),
-  `0005_ai_run_cost` (`ai_run.actual_cost_usd`, `cache_write_tokens`).
+  `0005_ai_run_cost` (`ai_run.actual_cost_usd`, `cache_write_tokens`), `0006_ai_run_batch_check`
+  (`ai_run.batch_checked_at`, `batch_counts`; status `ended` = finished, not collected).
 - **`import [--sqlite data/vehicles.sqlite]`**: copies listings into `staging.raw_listing`,
   opening the file read-only.
   - A file whose sha256 was already imported is skipped.
@@ -249,8 +252,8 @@ in pipeline order:
     the machine's local time), re-read from `.env` on every submission. Spent = each run
     submitted in the period, at its real cost once collected (`ai_run.actual_cost_usd`) or its
     estimate until then. Without a valid limit nothing is sent.
-  - `--collect [--run-id N]`: fetches the finished results (default: the latest submitted
-    run) and applies them. Identity results become review cases, individual or sampled.
+  - `--collect [--run-id N]`: fetches the finished results (default: the latest `submitted`
+    or `ended` run) and applies them. Identity results become review cases, individual or sampled.
     Spec results become `ai_knowledge` evidence in `pending_review`.
   - Other flags: `--makes Toyota,Mazda` (pilot), `--limit N`, and `--effort` (default `low`
     for identity, `medium` for specs). `ai-specs` also takes `--min-listings 3`.
@@ -270,7 +273,7 @@ in pipeline order:
   - A correction that doesn't parse or is out of range is counted as `invalid_value` and the
     case stays pending.
   - Then run `normalize` and `consolidate` to propagate the decisions.
-- **`worker [--propagate-idle 120] [--poll 30] [--once]`** (alias `review worker`): applies the
+- **`worker [--propagate-idle 120] [--poll 30] [--batch-check 300] [--once]`** (alias `review worker`): applies the
   decisions the review website queues in `kb.review_decision` and runs its jobs from `kb.job`
   (LISTEN/NOTIFY on both, plus a poll as a fallback). Decisions go first, then one job at a time.
   - Each decision goes through `decide_item` in a savepoint: `applied`, `failed` with the
@@ -281,6 +284,12 @@ in pipeline order:
   - `--once` applies the queue, runs the queued jobs (and propagates if a decision was
     applied), then exits.
   - On start it marks jobs left `running` by a stopped worker as `failed`.
+  - Every `--batch-check` seconds (and on start; `0` = never), while some `ai_run` is
+    `submitted`, it asks Anthropic for the batch status (`ai_batch.retrieve_batch`, a free read
+    that needs `ANTHROPIC_API_KEY`; without it, it logs a warning once). A finished batch moves
+    the run to `ended` with `ended_at` and `batch_counts`; the site then shows a notice on every
+    page with "Recoger resultados" (an `ai_collect` job). It never collects by itself. Tests
+    replace `worker._retrieve_fn`. `kb status` lists `ended` runs too.
   - `ai_submit` jobs are refused unless `KB_ALLOW_WEB_AI_SUBMIT=true`. The worker re-reads it
     from `.env` on every submission (`worker.ai_submit_allowed`), so no restart is needed to
     switch it; a value in `.env` wins over the process environment (`kb/settings.py`, also used

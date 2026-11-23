@@ -21,17 +21,21 @@ rows. This worker carries them out with the CLI's own code.
   finished less than an hour ago, the requests are still exactly the ones estimated
   (fingerprint), the confirmed amount covers the estimate, and it fits the AI budget
   (``KB_AI_BUDGET_USD`` per ``KB_AI_BUDGET_PERIOD``, see budget.py, checked in commands.ai_submit).
+* Every ``batch_check`` seconds (only while some run is ``submitted``) it asks Anthropic whether
+  the batch finished (a free read) and moves finished runs to ``ended``, so the website can tell
+  the reviewers to collect them. Collecting stays a human action (an ``ai_collect`` job).
 """
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 import psycopg
-from . import commands, settings
+from . import ai_batch, commands, settings
 from .commands import CommandResult, SubmitRefused
 from .db import connect, database_url, jsonb, writer_lock
 from .review import close_sample_batches, create_sample_batches, decide_item
@@ -43,8 +47,12 @@ log = logging.getLogger("vehicle_scraper.kb.worker")
 ESTIMATE_MAX_AGE_MIN = 60
 KEEP_FILES = 10
 AI_SUBMIT_ENV = "KB_ALLOW_WEB_AI_SUBMIT"   # read from the .env in settings.ENV_FILE
+API_KEY_ENV = "ANTHROPIC_API_KEY"
 # Replaced in tests by a fake that records the submission instead of calling the API.
 _submit_fn: Optional[Callable] = None
+# Replaced in tests: batch_id -> {"processing_status", "ended_at", "request_counts"} (no network).
+_retrieve_fn: Optional[Callable] = None
+_warned_no_key = False
 
 # decide_item outcome -> review_decision.status (and the error shown on the website)
 OUTCOMES = {
@@ -66,6 +74,7 @@ class WorkerSettings:
     seed: int = 20261120
     min_accuracy: float = 0.95
     min_confidence: float = 0.8
+    batch_check: float = 300.0      # seconds between checks of submitted AI batches; 0 = never
 
 
 # --- decisions -------------------------------------------------------------------------------------
@@ -235,6 +244,43 @@ def run_next_job(url: str) -> Optional[tuple[dict, str]]:
     return job, status
 
 
+# --- AI batches ----------------------------------------------------------------------------------------
+def check_batches(url: str) -> list[int]:
+    """Ask Anthropic about each submitted run and mark the finished ones ``ended``. Returns the
+    runs that finished. The network call happens outside any transaction; each update is short
+    and holds the writer lock. A failed check is logged and retried on the next round."""
+    global _warned_no_key
+    with connect(url) as conn:
+        runs = ai_batch.runs_to_check(conn)
+    if not runs:
+        return []
+    retrieve = _retrieve_fn
+    if retrieve is None:
+        key = settings.env_setting(API_KEY_ENV)
+        if not key:
+            if not _warned_no_key:
+                log.warning("%s run(s) submitted but no %s: can't check whether their batch finished",
+                            len(runs), API_KEY_ENV)
+                _warned_no_key = True
+            return []
+        os.environ[API_KEY_ENV] = key      # the SDK reads it from the environment (re-read from .env)
+        retrieve = ai_batch.retrieve_batch
+    ended = []
+    for run in runs:
+        try:
+            info = retrieve(run["batch_id"])
+        except Exception as exc:        # noqa: BLE001 - network or API error: try again next round
+            log.warning("could not check batch of ai_run %s: %s: %s", run["id"], type(exc).__name__, exc)
+            continue
+        with connect(url) as conn:
+            writer_lock(conn)
+            if ai_batch.mark_checked(conn, run["id"], info):
+                ended.append(run["id"])
+                log.info("ai_run %s (%s) ended: %s. Collect it from /tareas or with --collect --run-id %s",
+                         run["id"], run["kind"], info.get("request_counts"), run["id"])
+    return ended
+
+
 # --- loop ----------------------------------------------------------------------------------------------
 def _cycle(url: str, work: Callable) -> object:
     with connect(url) as conn:
@@ -272,18 +318,28 @@ def run_worker(url: Optional[str] = None, cfg: WorkerSettings = WorkerSettings()
             if status == "done" and job["command"] == "ai_collect":
                 _cycle(url, sample)
 
+    def batches() -> None:
+        try:
+            check_batches(url)
+        except psycopg.Error:           # the database hiccuped: the next round tries again
+            log.exception("checking AI batches failed")
+
     if once:
         dirty, _ = drain(False)
         if dirty and cfg.propagate_idle > 0:
             log.info(_cycle(url, propagate))
+        if cfg.batch_check > 0:
+            batches()
         return 0
 
     listener = psycopg.connect(url, autocommit=True)
     listener.execute(f"LISTEN {CHANNEL}")
     listener.execute(f"LISTEN {JOB_CHANNEL}")
-    log.info("listening on %s, %s (propagate after %ss idle; AI submit from the site %s)", CHANNEL, JOB_CHANNEL,
-             cfg.propagate_idle, "ENABLED" if ai_submit_allowed() else "disabled")
+    log.info("listening on %s, %s (propagate after %ss idle; AI batches checked every %ss; AI submit from the "
+             "site %s)", CHANNEL, JOB_CHANNEL, cfg.propagate_idle, cfg.batch_check,
+             "ENABLED" if ai_submit_allowed() else "disabled")
     dirty, last_applied, last_sample = False, 0.0, time.monotonic()
+    last_batch_check = float("-inf")    # check right away: a batch may have finished while stopped
     try:
         while True:
             dirty, last = drain(dirty)
@@ -297,6 +353,9 @@ def run_worker(url: Optional[str] = None, cfg: WorkerSettings = WorkerSettings()
                 if _cycle(url, sample):
                     log.info("created sample batch(es)")
                 last_sample = now
+            if cfg.batch_check > 0 and now - last_batch_check >= cfg.batch_check:
+                batches()
+                last_batch_check = now
             wait = cfg.poll
             if dirty and cfg.propagate_idle > 0:
                 wait = max(0.5, min(wait, cfg.propagate_idle - (time.monotonic() - last_applied)))

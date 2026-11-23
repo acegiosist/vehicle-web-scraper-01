@@ -57,6 +57,26 @@ def fake_ai_answer(conn) -> None:
                              [{"custom_id": req["custom_id"], "type": "succeeded", "message": msg}])
 
 
+def fake_anthropic() -> None:
+    """No network from the e2e worker: the spent run is still processing, the other one finished
+    (4 answers, 1 error), and collecting it stores no answers (its requests aren't in kb.ai_decision)."""
+    from datetime import datetime, timedelta, timezone
+
+    def retrieve(batch_id):
+        done = batch_id == "msgbatch_e2e_done"
+        return {"processing_status": "ended" if done else "in_progress",
+                "ended_at": datetime.now(timezone.utc) - timedelta(minutes=3) if done else None,
+                "request_counts": {"succeeded": 4, "errored": 1, "expired": 0, "canceled": 0, "processing": 0}
+                if done else {"succeeded": 0, "errored": 0, "expired": 0, "canceled": 0, "processing": 1}}
+
+    def collect(conn, run_id, wait=False):
+        run = conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run_id,)).fetchone()
+        return ai_batch.store_and_apply(conn, run, []) or {"succeeded": 0}
+
+    worker._retrieve_fn = retrieve
+    ai_batch.collect = collect
+
+
 def main() -> int:
     admin = os.environ.get("KB_TEST_DATABASE_URL")
     if not admin:
@@ -81,6 +101,12 @@ def main() -> int:
             conn.execute("""INSERT INTO kb.ai_run (kind, batch_id, model, effort, status, submitted_at, est_cost_usd)
                             VALUES ('specs', 'msgbatch_e2e_spent', 'claude-opus-5-5', 'medium', 'submitted',
                                     now(), 2)""")               # US$2 spent today: over the US$1 budget
+            # a batch that already finished at Anthropic: the worker's first check marks it 'ended'
+            conn.execute("""INSERT INTO kb.ai_run (kind, batch_id, model, effort, status, request_count, submitted_at,
+                                                   est_cost_usd)
+                            VALUES ('identity', 'msgbatch_e2e_done', 'claude-opus-5-5', 'low', 'submitted', 5,
+                                    now() - interval '20 minutes', 0)""")
+    fake_anthropic()
     # never send a real batch from the tests: ignore the repo's .env (KB_ALLOW_WEB_AI_SUBMIT stays
     # off) and give the worker a US$1 daily budget that the seed has already exceeded
     settings.ENV_FILE = ""

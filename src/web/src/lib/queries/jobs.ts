@@ -76,16 +76,38 @@ export async function aiSpentSince(start: string): Promise<number> {
   return Number(row.usd);
 }
 
-/** AI runs still waiting to be collected. */
-export async function submittedRuns() {
+const RUN_COLUMNS = [
+  "id",
+  "kind",
+  "status",
+  "request_count",
+  "submitted_at",
+  "ended_at",
+  "batch_checked_at",
+  "batch_counts",
+  "est_cost_usd",
+  "actual_cost_usd",
+] as const;
+
+/** AI runs not collected yet: still processing at Anthropic (submitted) or finished (ended).
+ *  ``db_now`` is the database's clock, to say "hace 3 min" against the same clock as the dates. */
+export async function pendingRuns() {
   await io();
   return getDb()
     .selectFrom("kb.ai_run")
-    .select(["id", "kind", "request_count", "submitted_at", "est_cost_usd"])
-    .where("status", "=", "submitted")
+    .select([...RUN_COLUMNS, sql<Date>`now()`.as("db_now")])
+    .where("status", "in", ["submitted", "ended"])
     .orderBy("id", "desc")
     .execute();
 }
+
+/** The latest AI runs, whatever their status (the "Lotes de IA" table on /tareas). */
+export async function recentRuns(limit = 10) {
+  await io();
+  return getDb().selectFrom("kb.ai_run").select(RUN_COLUMNS).orderBy("id", "desc").limit(limit).execute();
+}
+
+export type AiRunRow = Awaited<ReturnType<typeof recentRuns>>[number];
 
 export async function jobFile(id: string) {
   if (!ID.test(id)) return null;

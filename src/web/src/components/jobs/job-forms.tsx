@@ -12,6 +12,7 @@ import { enqueueJob, type JobFormState } from "@/lib/actions/jobs";
 interface Run {
   id: string;
   kind: string;
+  status: string;
   request_count: number;
 }
 
@@ -182,7 +183,8 @@ export function JobForms({ runs }: { runs: Run[] }) {
                 <option value="">La última enviada</option>
                 {runs.map((r) => (
                   <option key={r.id} value={r.id}>
-                    #{r.id} · {r.kind === "identity" ? "identidad" : "fichas"} · {r.request_count} requests
+                    #{r.id} · {r.kind === "identity" ? "identidad" : "fichas"} · {r.request_count} requests ·{" "}
+                    {r.status === "ended" ? "lista para recoger" : "en proceso"}
                   </option>
                 ))}
               </NativeSelect>

@@ -5,7 +5,8 @@ import { JobForms } from "@/components/jobs/job-forms";
 import { JobPoller } from "@/components/jobs/job-poller";
 import { JobTable } from "@/components/jobs/job-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listJobs, submittedRuns } from "@/lib/queries/jobs";
+import { RunTable } from "@/components/ai-runs/run-table";
+import { listJobs, pendingRuns, recentRuns } from "@/lib/queries/jobs";
 
 export const metadata: Metadata = { title: "Tareas" };
 
@@ -30,12 +31,29 @@ export default function JobsPage() {
           <Jobs />
         </Suspense>
       </section>
+      <section aria-labelledby="runs-heading" className="space-y-3">
+        <div>
+          <h2 id="runs-heading" className="text-lg font-semibold">
+            Lotes de IA
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            El worker revisa cada 5 minutos si un lote enviado terminó; entonces aparece un aviso para recogerlo.
+          </p>
+        </div>
+        <Suspense fallback={<Skeleton className="h-32" />}>
+          <Runs />
+        </Suspense>
+      </section>
     </main>
   );
 }
 
 async function Forms() {
-  return <JobForms runs={await submittedRuns()} />;
+  return <JobForms runs={await pendingRuns()} />;
+}
+
+async function Runs() {
+  return <RunTable runs={await recentRuns()} />;
 }
 
 async function Jobs() {

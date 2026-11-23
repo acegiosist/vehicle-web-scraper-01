@@ -51,4 +51,7 @@ def status(conn) -> str:
         lines.append("  " + "  ".join(f"{f}={cov[f]}" for f in fields[i:i + 4]))
     for r in q("SELECT kind, status, count(*) AS n, sum(request_count) AS req, sum(est_cost_usd) AS usd FROM kb.ai_run GROUP BY 1, 2"):
         lines.append(f"AI runs: {r['kind']} {r['status']} runs={r['n']} requests={r['req']} est=US${r['usd']}")
+    for r in q("SELECT id, kind, ended_at, batch_counts FROM kb.ai_run WHERE status = 'ended' ORDER BY id"):
+        lines.append(f"AI run {r['id']} ({r['kind']}) finished {r['ended_at']:%Y-%m-%d %H:%M} {r['batch_counts'] or {}}: "
+                     f"collect it with `kb ai-{r['kind']} --collect --run-id {r['id']}`")
     return "\n".join(lines)

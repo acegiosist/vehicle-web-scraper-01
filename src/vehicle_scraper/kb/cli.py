@@ -43,7 +43,7 @@ def add_parser(sub) -> None:
         a.add_argument("--limit", type=int, default=None, help="max requests")
         if kind == "specs":
             a.add_argument("--min-listings", type=int, default=3, help="only variants with this many listings")
-        a.add_argument("--run-id", type=int, default=None, help="ai_run to collect (default: latest submitted)")
+        a.add_argument("--run-id", type=int, default=None, help="ai_run to collect (default: latest submitted or ended)")
 
     r = ks.add_parser("review", help="human review round-trip (CSV, opens in Excel)")
     rs = r.add_subparsers(dest="review_cmd", required=True)
@@ -85,6 +85,8 @@ def _worker_args(w) -> None:
     w.add_argument("--propagate-idle", type=float, default=120.0,
                    help="seconds without new decisions before running normalize + consolidate (0 = never)")
     w.add_argument("--poll", type=float, default=30.0, help="max seconds between queue checks")
+    w.add_argument("--batch-check", type=float, default=300.0,
+                   help="seconds between checks of submitted AI batches at Anthropic (free; 0 = never)")
     w.add_argument("--once", action="store_true", help="apply decisions and run queued jobs once, then exit")
 
 
@@ -104,8 +106,8 @@ def run(args) -> int:
         import logging
         from .worker import WorkerSettings, run_worker
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-        return run_worker(args.database_url, WorkerSettings(propagate_idle=args.propagate_idle, poll=args.poll),
-                          once=args.once)
+        return run_worker(args.database_url, WorkerSettings(propagate_idle=args.propagate_idle, poll=args.poll,
+                                                            batch_check=args.batch_check), once=args.once)
 
     from .db import database_url
     if args.kb_cmd == "migrate":

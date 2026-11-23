@@ -513,3 +513,78 @@ def test_collected_runs_keep_their_real_cost(db, tmp_path):
     with connect(db) as conn:
         r = conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone()
         assert float(r["actual_cost_usd"]) == ai_batch.actual_cost(1000, 2000, 3000, 0)
+
+
+def test_worker_marks_finished_batches_for_collection(db, tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    import anthropic
+
+    from vehicle_scraper.kb import commands
+    from vehicle_scraper.kb.export import status as kb_status
+
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", [rec("carroya", 20, "Zzzmotors", "Thing")]))
+    with connect(db) as conn:
+        req = ai_batch._with_params(ai_batch.identity_requests(conn), "identity", "low")[0]
+        run = ai_batch.record_submission(conn, [req], "identity", "low", {"cost_usd_est": 0.01}, "msgbatch_check")
+    status = {"processing_status": "in_progress", "ended_at": None,
+              "request_counts": {"processing": 1, "succeeded": 0, "errored": 0, "expired": 0, "canceled": 0}}
+    calls = []
+
+    def fake_retrieve(batch_id):                        # no network
+        calls.append(batch_id)
+        return status
+    monkeypatch.setattr(worker, "_retrieve_fn", fake_retrieve)
+
+    def run_row():
+        with connect(db) as conn:
+            return conn.execute("SELECT * FROM kb.ai_run WHERE id = %s", (run,)).fetchone()
+
+    assert worker.check_batches(db) == []                                     # still processing
+    r = run_row()
+    assert r["status"] == "submitted" and r["batch_checked_at"] and r["batch_counts"]["processing"] == 1
+
+    ended = datetime(2026, 11, 23, 14, 7, tzinfo=timezone.utc)
+    status.update(processing_status="ended", ended_at=ended,
+                  request_counts={"processing": 0, "succeeded": 1, "errored": 0, "expired": 0, "canceled": 0})
+    assert worker.check_batches(db) == [run]                                  # finished: ready to collect
+    r = run_row()
+    assert (r["status"], r["ended_at"], r["batch_counts"]["succeeded"]) == ("ended", ended, 1)
+    assert worker.check_batches(db) == [] and calls == ["msgbatch_check"] * 2  # an ended run isn't asked again
+    with connect(db) as conn:
+        assert f"AI run {run} (identity) finished" in kb_status(conn)            # `kb status` says so too
+
+    # older code only collects submitted runs: a downgrade gives the uncollected ones back
+    _alembic(db, "downgrade", "0005_ai_run_cost")
+    with connect(db) as conn:
+        assert conn.execute("SELECT status FROM kb.ai_run WHERE id = %s", (run,)).fetchone()["status"] == "submitted"
+    _alembic(db, "upgrade", "head")
+    with connect(db) as conn:
+        conn.execute("UPDATE kb.ai_run SET status = 'ended', ended_at = %s WHERE id = %s", (ended, run))
+
+    # an ended run is collected like a submitted one (the default picks it) and keeps its end time
+    msg = {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps({"models": []})}],
+           "usage": {"input_tokens": 10, "output_tokens": 20}}
+    result = SimpleNamespace(type="succeeded", message=SimpleNamespace(model_dump=lambda: msg))
+    batches = SimpleNamespace(retrieve=lambda batch_id: SimpleNamespace(processing_status="ended"),
+                              results=lambda batch_id: [SimpleNamespace(custom_id=req["custom_id"], result=result)])
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: SimpleNamespace(messages=SimpleNamespace(batches=batches)))
+    with connect(db) as conn:
+        assert commands.ai_collect(conn).result == {"succeeded": 1}
+    r = run_row()
+    assert (r["status"], r["ended_at"], r["input_tokens"]) == ("applied", ended, 10)
+
+    # without an API key nothing is checked (and the worker says so once)
+    with connect(db) as conn:
+        conn.execute("""INSERT INTO kb.ai_run (kind, batch_id, model, effort, status, submitted_at)
+                        VALUES ('specs', 'msgbatch_nokey', 'm', 'low', 'submitted', now())""")
+    monkeypatch.setattr(worker, "_retrieve_fn", None)
+    monkeypatch.setattr(worker, "_warned_no_key", False)
+    monkeypatch.setattr(settings, "ENV_FILE", "")
+    monkeypatch.delenv(worker.API_KEY_ENV, raising=False)
+    assert worker.check_batches(db) == [] and worker._warned_no_key
+    with connect(db) as conn:
+        assert conn.execute("SELECT batch_checked_at FROM kb.ai_run WHERE batch_id = 'msgbatch_nokey'"
+                            ).fetchone()["batch_checked_at"] is None

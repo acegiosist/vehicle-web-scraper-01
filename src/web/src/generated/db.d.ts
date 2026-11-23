@@ -44,6 +44,14 @@ export interface KbAiRun {
    * Real cost of the collected batch (USD), from its token usage. NULL until collected.
    */
   actual_cost_usd: Numeric | null;
+  /**
+   * Last time the worker asked Anthropic for the batch status (NULL: never checked).
+   */
+  batch_checked_at: Timestamp | null;
+  /**
+   * Request counts of the batch at the last check: succeeded, errored, expired, canceled, processing.
+   */
+  batch_counts: Json | null;
   batch_id: string | null;
   cache_read_tokens: Generated<Int8>;
   cache_write_tokens: Generated<Int8>;

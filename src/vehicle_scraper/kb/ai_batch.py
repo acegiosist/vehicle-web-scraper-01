@@ -232,11 +232,42 @@ def parse_message(message) -> tuple[Optional[dict], Optional[str]]:
         return None, stop
 
 
+COLLECTABLE = ("submitted", "ended")   # ended: the worker saw the batch finish (check_batch)
+
+
+def retrieve_batch(batch_id: str) -> dict:
+    """The batch's status at Anthropic. A free read: only the batch id is sent."""
+    import anthropic
+    b = anthropic.Anthropic().messages.batches.retrieve(batch_id)
+    return {"processing_status": b.processing_status, "ended_at": b.ended_at,
+            "request_counts": b.request_counts.model_dump()}
+
+
+def runs_to_check(conn) -> list[dict]:
+    """Submitted runs whose batch may have finished since the last check."""
+    return conn.execute("SELECT id, kind, batch_id FROM kb.ai_run WHERE status = 'submitted' AND batch_id IS NOT NULL "
+                        "ORDER BY id").fetchall()
+
+
+def mark_checked(conn, run_id: int, info: dict) -> bool:
+    """Record a status check; a finished batch moves the run to ``ended`` (ready to collect).
+    Returns True when this check is the one that saw it finish."""
+    ended = info.get("processing_status") == "ended"
+    row = conn.execute(
+        """UPDATE kb.ai_run SET batch_checked_at = now(), batch_counts = %s,
+                  status = CASE WHEN %s THEN 'ended' ELSE status END,
+                  ended_at = CASE WHEN %s THEN coalesce(%s, now()) ELSE ended_at END
+            WHERE id = %s AND status = 'submitted' RETURNING status""",
+        (jsonb(info.get("request_counts") or {}), ended, ended, info.get("ended_at"), run_id)).fetchone()
+    return bool(row and row["status"] == "ended")
+
+
 def collect(conn, run_id: Optional[int], wait: bool = False) -> dict:
     import anthropic
     client = anthropic.Anthropic()
-    run = conn.execute("SELECT * FROM kb.ai_run WHERE " + ("id = %s" if run_id else "status = 'submitted' ORDER BY id DESC LIMIT 1"),
-                       (run_id,) if run_id else ()).fetchone()
+    run = conn.execute("SELECT * FROM kb.ai_run WHERE " + ("id = %s" if run_id else
+                                                           "status = ANY(%s) ORDER BY id DESC LIMIT 1"),
+                       (run_id,) if run_id else (list(COLLECTABLE),)).fetchone()
     if not run:
         return {"status": "no submitted run"}
     batch = client.messages.batches.retrieve(run["batch_id"])
@@ -277,7 +308,8 @@ def store_and_apply(conn, run: dict, results: list[dict]) -> dict:
             meta = dec["request"]["meta"]
             (apply_identity if run["kind"] == "identity" else apply_specs)(conn, dec["id"], meta, data, stats)
             conn.execute("UPDATE kb.ai_decision SET applied = true WHERE id = %s", (dec["id"],))
-    conn.execute("""UPDATE kb.ai_run SET status = 'applied', ended_at = now(), input_tokens = %s, output_tokens = %s,
+    conn.execute("""UPDATE kb.ai_run SET status = 'applied', ended_at = coalesce(ended_at, now()),
+                    input_tokens = %s, output_tokens = %s,
                     cache_read_tokens = %s, cache_write_tokens = %s, actual_cost_usd = %s WHERE id = %s""",
                  (tin, tout, tcache, twrite, actual_cost(tin, tout, tcache, twrite), run["id"]))
     return dict(stats)
