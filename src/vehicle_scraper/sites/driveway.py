@@ -12,12 +12,18 @@ used at the user's request, through PoliteClient like everything else.
   bigger than ``max_window`` is split into price ranges until each fits. Range bounds are
   inclusive, so cars priced exactly on a bound show up twice and are dropped as duplicates by
   ``vehicleId``. The ranges are merged by date, so the stream stays newest first as a whole.
-* A full run (no ``--limit``, with or without ``--max-age``) fetches the whole list before parsing: parsing takes days, and
-  paging by offset while cars are sold would shift the pages and skip cars.
+* A full run (no ``--limit``, with or without ``--max-age``) fetches the whole list before
+  parsing (500 per page; the API 502s at 1000): paging by offset while cars are sold during the
+  run would shift the pages and skip cars.
 * Parsing: the search result (year, make, model, trim, price, mileage in miles, fuel, MPG) plus
   the car page's GraphQL query (``shop/gql/v5/graphql``, ``getVehicleById``) for the overview
   (body, doors, engine, transmission, drive type) and every equipment list the page shows. No
   browser needed; ``--browser`` changes nothing here.
+* Details are fetched ``detail_batch`` cars per request (one GraphQL query with an alias per car):
+  discover() yields listings in blocks, and the first parse() of a block asks for that car and
+  the block's other cars not fetched yet. Cars run_site skips (already stored) are never asked
+  for on their own. A sold car fails only its own alias; if a whole batch request fails, the run
+  goes on one car per request.
 * Not requested or stored: the VIN and the dealership.
 """
 from __future__ import annotations
@@ -26,6 +32,7 @@ import heapq
 import os
 from typing import Iterator, Optional
 
+from ..http import BlockedError, DisallowedError
 from ..mapping import RecordBuilder
 from ..models import VehicleRecord
 from ..normalize import to_datetime
@@ -37,13 +44,15 @@ GRAPHQL_URL = f"{API}/shop/gql/v5/graphql"
 PUBLIC_KEY = "e6c1852eb5124b1890fbd17ad53e870a"      # shipped in driveway.com's own JavaScript
 
 # Only what the record needs (the page's own query also asks for the VIN, dealership, images...).
-DETAIL_QUERY = """query GetVehicle($id: String!) {
-  getVehicleById(id: $id) {
-    bodyStyle bedStyle cabStyle doors engine transmission driveType fuel
-    mpg { highway city }
-    categoryFeatures { category features }
-  }
-}"""
+DETAIL_FIELDS = ("bodyStyle bedStyle cabStyle doors engine transmission driveType fuel "
+                 "mpg { highway city } categoryFeatures { category features }")
+
+
+def detail_query(n: int) -> str:
+    """One query for ``n`` cars: alias ``c<i>`` reads variable ``$c<i>``."""
+    params = ", ".join(f"$c{i}: String!" for i in range(n))
+    fields = "\n".join(f"  c{i}: getVehicleById(id: $c{i}) {{ {DETAIL_FIELDS} }}" for i in range(n))
+    return f"query Details({params}) {{\n{fields}\n}}"
 
 
 @register
@@ -56,9 +65,15 @@ class DrivewayScraper(SiteScraper):
     notes = 'Internal search API sorted newest-first (inventoryDate) + GraphQL car details'
 
     condition_groups: tuple[tuple[str, ...], ...] = (("CPO", "USED"), ("NEW",))
-    page_size = 100
+    page_size = 500                     # search results per request (1000 answers 502)
+    detail_batch = 50                   # cars per GraphQL detail request
     max_window = 29_000                 # results one query can page through (the API 502s past ~30k)
     price_range = (0, 100_000_000)      # the whole inventory: used when a group has to be split
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pending: list[Listing] = []   # the block discover() is yielding, not parsed or skipped yet
+        self._details: dict = {}            # vehicleId -> detail (None: not found) for that block
 
     @property
     def _key(self) -> str:
@@ -128,30 +143,68 @@ class DrivewayScraper(SiteScraper):
         # Every range is sorted newest first; merging them by inventoryDate keeps the whole
         # stream newest first, so --limit takes the newest cars of all ranges (not of the first)
         # and the first car older than --max-age means every car still to come is older too.
+        # Blocks of detail_batch listings, but no bigger than the run needs (--limit 2: blocks of 2).
+        block_size = min([self.detail_batch] + [n for n in (limit, self.run_limit) if n])
         seen: set[str] = set()
+        block: list[Listing] = []
         for car in heapq.merge(*ranges, key=lambda c: c.get("inventoryDate") or "", reverse=True):
             vid = str(car.get("vehicleId") or "")
             if not vid or vid in seen:
                 continue
             seen.add(vid)
             listed_at = to_datetime(car.get("inventoryDate"))
-            yield Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car, listed_at=listed_at)
-            if limit is not None and len(seen) >= limit:
+            block.append(Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car, listed_at=listed_at))
+            last = (limit is not None and len(seen) >= limit) or bool(
+                self.listed_since and listed_at and listed_at < self.listed_since)   # run_site: too old
+            if len(block) >= block_size or last:
+                yield from self._yield_block(block)
+                block = []
+            if last:
                 return
-            if self.listed_since and listed_at and listed_at < self.listed_since:
-                return                                # run_site counts this one as too old
+        yield from self._yield_block(block)
 
-    # -- parsing ---------------------------------------------------------------
-    def _detail(self, vehicle_id: str) -> dict:
-        r = self.client.post(GRAPHQL_URL, json={"query": DETAIL_QUERY, "variables": {"id": vehicle_id}},
+    def _yield_block(self, block: list[Listing]) -> Iterator[Listing]:
+        """Yield a block of listings; parse() fetches their details together (``_pending``)."""
+        self._pending, self._details = list(block), {}
+        for listing in block:
+            yield listing
+            self._pending.remove(listing)
+
+    # -- details ---------------------------------------------------------------
+
+    def _fetch_details(self, ids: list[str]) -> dict:
+        """Details of ``ids`` in one GraphQL request; a car that isn't found maps to None."""
+        r = self.client.post(GRAPHQL_URL, json={"query": detail_query(len(ids)),
+                                                "variables": {f"c{i}": v for i, v in enumerate(ids)}},
                              headers={**self._headers(), "Ocp-Apim-Subscription-Key": self._key})
         data = r.json()
-        car = (data.get("data") or {}).get("getVehicleById")
-        if not car:
+        if not isinstance(data.get("data"), dict):
             errors = "; ".join(e.get("message", "") for e in data.get("errors") or [])
-            raise ValueError(f"no details for vehicle {vehicle_id} (sold?): {errors or 'empty answer'}")
+            raise ValueError(f"detail request failed: {errors or 'empty answer'}")
+        return {v: data["data"].get(f"c{i}") for i, v in enumerate(ids)}
+
+    def _detail(self, vehicle_id: str) -> dict:
+        if vehicle_id not in self._details:
+            ids = [vehicle_id] + [l.listing_id for l in self._pending
+                                  if l.listing_id != vehicle_id and l.listing_id not in self._details]
+            ids = ids[:self.detail_batch]
+            try:
+                self._details.update(self._fetch_details(ids))
+            except (BlockedError, DisallowedError):
+                raise
+            except Exception as e:  # noqa: BLE001 - e.g. a 502 on a big query: go one by one
+                if len(ids) == 1:
+                    raise
+                self.log.warning("batch of %d details failed (%s); one car per request from now on",
+                                 len(ids), e)
+                self.detail_batch = 1
+                self._details.update(self._fetch_details([vehicle_id]))
+        car = self._details.pop(vehicle_id, None)
+        if not car:
+            raise ValueError(f"no details for vehicle {vehicle_id} (sold?)")
         return car
 
+    # -- parsing ---------------------------------------------------------------
     def parse(self, listing: Listing) -> VehicleRecord:
         b = RecordBuilder(self.name, listing.url, listing.listing_id)
         car = listing.payload or {}

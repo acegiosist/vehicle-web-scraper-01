@@ -139,8 +139,9 @@ debugging.
 - **driveway.com** (US) — unverified; uses two internal APIs its own pages call (public
   frontend key, `DRIVEWAY_API_KEY` overrides): the /shop search, sorted newest-first with
   `inventoryDate` as the listing date, and the car page's GraphQL query for the overview and
-  equipment lists (no browser needed). One search query pages through ~30k results at most, so
-  big groups are split by price; a run without `--limit` fetches the whole list up front.
+  equipment lists (no browser needed), 50 cars per GraphQL request (aliases). One search query
+  pages through ~30k results at most (500 per page), so big groups are split by price; a run
+  without `--limit` fetches the whole list up front. A full run takes about an hour.
 
 ## Git Commit & Push Workflow
 When the user says "commit my changes" or "commit and push my changes", perform the following steps automatically:
