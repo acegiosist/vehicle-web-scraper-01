@@ -26,6 +26,24 @@ def test_engine_cylinder_count_is_not_displacement():
     assert b.build().engine_displacement_l == 2.0
 
 
+def test_features_english_equipment_lists():
+    # Driveway's equipment lists
+    assert match_features("Back-Up Camera") == {"reverse_camera"}
+    assert match_features("Keyless Start") == {"push_button_start"}      # not keyless entry
+    assert match_features("Keyless Entry") == {"keyless_entry"}
+    assert match_features("Push-Button Start") == {"push_button_start"}
+    assert match_features("Multi-Zone A/C") == {"dual_zone_ac"}
+    assert match_features("Rear Parking Aid") == {"parking_sensors"}
+    assert match_features("Security System") == {"alarm"}
+    assert match_features("Power Driver Seat") == {"power_seats"}
+    assert match_features("Fog Lamps") == {"fog_lights"}
+    assert match_features("Roof Rack") == {"roof_rails"}
+    # Other "power" equipment isn't a power seat
+    assert match_features("Power Steering") == set()
+    assert match_features("Power Windows") == set()
+    assert match_features("Power Liftgate") == set()
+
+
 def test_features():
     assert match_features("Cámara de reversa") == {"reverse_camera"}
     assert match_features("Tapicería en cuero") == {"leather_seats"}
