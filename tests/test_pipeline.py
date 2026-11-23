@@ -125,11 +125,13 @@ def test_max_age_filters_on_listing_date(dated):
 def test_max_age_cutoff_is_passed_to_the_scraper(dated, monkeypatch):
     seen = []
     orig = _DatedScraper.discover
-    monkeypatch.setattr(_DatedScraper, "discover", lambda self, limit=None: (seen.append(self.listed_since),
-                                                                             orig(self, limit))[1])
+    monkeypatch.setattr(_DatedScraper, "discover",
+                        lambda self, limit=None: (seen.append((self.listed_since, self.run_limit, limit)),
+                                                  orig(self, limit))[1])
     since = NOW - cli.parse_max_age("5")
-    cli.run_site("dated", dated, limit=None, refresh=False, listed_since=since)
-    assert seen == [since]                             # newest-first scrapers may stop paging there
+    cli.run_site("dated", dated, limit=3, refresh=False, listed_since=since)
+    # discover() gets no limit under --max-age; the scraper still sees the cutoff and the --limit
+    assert seen == [(since, 3, None)]
 
 
 def test_max_age_limit_counts_only_recent_listings(dated):

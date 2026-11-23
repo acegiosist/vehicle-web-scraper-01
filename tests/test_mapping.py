@@ -38,6 +38,8 @@ def test_features_english_equipment_lists():
     assert match_features("Power Driver Seat") == {"power_seats"}
     assert match_features("Fog Lamps") == {"fog_lights"}
     assert match_features("Roof Rack") == {"roof_rails"}
+    assert match_features("Aluminum Wheels") == {"alloy_wheels"}
+    assert match_features("Automatic Parking") == {"automatic_parking"}
     # Other "power" equipment isn't a power seat
     assert match_features("Power Steering") == set()
     assert match_features("Power Windows") == set()
