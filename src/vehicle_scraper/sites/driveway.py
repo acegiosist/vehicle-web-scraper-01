@@ -1,21 +1,30 @@
 r"""www.driveway.com (US) — https://www.driveway.com
 
-Discovery uses the search API the site's own /shop page calls
-(``api-gateway.driveway.com/search-mgmt/v1/search/results``, with the public key its frontend
-ships; override it with ``DRIVEWAY_API_KEY``). It is an internal API, not a documented one: used
-at the user's request, through PoliteClient like everything else.
+Uses two internal APIs the site's own pages call on ``api-gateway.driveway.com``, with the public
+key its frontend ships (override it with ``DRIVEWAY_API_KEY``). They are not documented APIs:
+used at the user's request, through PoliteClient like everything else.
 
-* Results are sorted "Newest Inventory" (``INVENTORY_NEWEST``) and each one carries its
-  ``inventoryDate``, used as ``listed_at``: ``run --max-age`` filters on it like on the other
-  sites, and paging stops at the first car older than the cutoff (the rest are older still).
-  The query ranges below are merged by date, so the stream stays newest first as a whole.
-* The API fails (HTTP 502) past ~30,000 results per query, so a group of conditions bigger than
-  ``max_window`` is split into price ranges until each fits. Range bounds are inclusive, so cars
-  priced exactly on a bound show up twice and are dropped as duplicates by ``vehicleId``.
-* A result has year, make, model, trim, price, mileage (miles), fuel and MPG, but no body style,
-  transmission or drivetrain. ``--browser`` renders the car page (``/shop/vehicle/<id>``) and
-  reads its spec overview and equipment lists too.
-* Not stored: the VIN and the dealership the API also returns.
+* Discovery: the search API behind /shop (``search-mgmt/v1/search/results``), sorted "Newest
+  Inventory" (``INVENTORY_NEWEST``). Each result carries its ``inventoryDate``, used as
+  ``listed_at``: ``run --max-age`` filters on it like on the other sites, and paging stops at the
+  first car older than the cutoff (the rest are older still).
+* The search API fails (HTTP 502) past ~30,000 results per query, so a group of conditions
+  bigger than ``max_window`` is split into price ranges until each fits. Range bounds are
+  inclusive, so cars priced exactly on a bound show up twice and are dropped as duplicates by
+  ``vehicleId``. The ranges are merged by date, so the stream stays newest first as a whole.
+* A full run (no ``--limit``, with or without ``--max-age``) fetches the whole list before
+  parsing (500 per page; the API 502s at 1000): paging by offset while cars are sold during the
+  run would shift the pages and skip cars.
+* Parsing: the search result (year, make, model, trim, price, mileage in miles, fuel, MPG) plus
+  the car page's GraphQL query (``shop/gql/v5/graphql``, ``getVehicleById``) for the overview
+  (body, doors, engine, transmission, drive type) and every equipment list the page shows. No
+  browser needed; ``--browser`` changes nothing here.
+* Details are fetched ``detail_batch`` cars per request (one GraphQL query with an alias per car):
+  discover() yields listings in blocks, and the first parse() of a block asks for that car and
+  the block's other cars not fetched yet. Cars run_site skips (already stored) are never asked
+  for on their own. A sold car fails only its own alias; if a whole batch request fails, the run
+  goes on one car per request.
+* Not requested or stored: the VIN and the dealership.
 """
 from __future__ import annotations
 
@@ -23,33 +32,55 @@ import heapq
 import os
 from typing import Iterator, Optional
 
-from .. import extract as X
+from ..http import BlockedError, DisallowedError
 from ..mapping import RecordBuilder
 from ..models import VehicleRecord
 from ..normalize import to_datetime
-from .base import Listing, register
-from .html_site import HtmlSiteScraper
+from .base import Listing, SiteScraper, register
 
-SEARCH_URL = "https://api-gateway.driveway.com/search-mgmt/v1/search/results"
+API = "https://api-gateway.driveway.com"
+SEARCH_URL = f"{API}/search-mgmt/v1/search/results"
+GRAPHQL_URL = f"{API}/shop/gql/v5/graphql"
 PUBLIC_KEY = "e6c1852eb5124b1890fbd17ad53e870a"      # shipped in driveway.com's own JavaScript
+
+# Only what the record needs (the page's own query also asks for the VIN, dealership, images...).
+DETAIL_FIELDS = ("bodyStyle bedStyle cabStyle doors engine transmission driveType fuel "
+                 "mpg { highway city } categoryFeatures { category features }")
+
+
+def detail_query(n: int) -> str:
+    """One query for ``n`` cars: alias ``c<i>`` reads variable ``$c<i>``."""
+    params = ", ".join(f"$c{i}: String!" for i in range(n))
+    fields = "\n".join(f"  c{i}: getVehicleById(id: $c{i}) {{ {DETAIL_FIELDS} }}" for i in range(n))
+    return f"query Details({params}) {{\n{fields}\n}}"
 
 
 @register
-class DrivewayScraper(HtmlSiteScraper):
+class DrivewayScraper(SiteScraper):
     name = 'driveway'
     base_url = 'https://www.driveway.com'
     country = 'US'
     currency = 'USD'
     status = "unverified"
-    notes = 'Internal search API sorted newest-first (inventoryDate); --browser adds specs/equipment'
+    notes = 'Internal search API sorted newest-first (inventoryDate) + GraphQL car details'
 
     condition_groups: tuple[tuple[str, ...], ...] = (("CPO", "USED"), ("NEW",))
-    page_size = 100
+    page_size = 500                     # search results per request (1000 answers 502)
+    detail_batch = 50                   # cars per GraphQL detail request
     max_window = 29_000                 # results one query can page through (the API 502s past ~30k)
     price_range = (0, 100_000_000)      # the whole inventory: used when a group has to be split
-    # Spec overview + equipment tabs on the rendered car page (not the payment calculator).
-    spec_selector = '[class*="DWVehicleDetailsTabs-wrapper"]'
-    wait_selector = '[data-testid="category-features"]'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pending: list[Listing] = []   # the block discover() is yielding, not parsed or skipped yet
+        self._details: dict = {}            # vehicleId -> detail (None: not found) for that block
+
+    @property
+    def _key(self) -> str:
+        return os.getenv("DRIVEWAY_API_KEY") or PUBLIC_KEY
+
+    def _headers(self) -> dict:
+        return {"Origin": self.base_url, "Referer": f"{self.base_url}/shop"}
 
     # -- discovery -------------------------------------------------------------
     def _search(self, conditions, price: Optional[tuple[float, float]], skip: int, items: int) -> dict:
@@ -58,9 +89,7 @@ class DrivewayScraper(HtmlSiteScraper):
             filters["priceWithFeesRange"] = {"from": price[0], "to": price[1]}
         body = {"filters": filters, "vehicleConditions": list(conditions), "includeSimilar": False,
                 "sort": "INVENTORY_NEWEST", "pagination": {"items": items, "skip": skip}}
-        key = os.getenv("DRIVEWAY_API_KEY") or PUBLIC_KEY
-        r = self.client.post(f"{SEARCH_URL}?key={key}", json=body,
-                             headers={"Origin": self.base_url, "Referer": f"{self.base_url}/shop"})
+        r = self.client.post(f"{SEARCH_URL}?key={self._key}", json=body, headers=self._headers())
         return r.json().get("exactMatch") or {}
 
     @staticmethod
@@ -100,31 +129,86 @@ class DrivewayScraper(HtmlSiteScraper):
             skip += len(results)
             if not results or skip >= self._total(page):
                 return
+            last = to_datetime(results[-1].get("inventoryDate"))
+            if self.listed_since and last and last < self.listed_since:
+                return                                # newest first: later pages are older still
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:
+        ranges: list = [self._results(conditions, price)
+                        for conditions in self.condition_groups for price in self._partitions(conditions)]
+        if limit is None and self.run_limit is None:
+            # A full run parses for days: take the whole list now, before sold cars shift the pages.
+            ranges = [list(r) for r in ranges]
+            self.log.info("fetched %d search results in %d price ranges", sum(map(len, ranges)), len(ranges))
         # Every range is sorted newest first; merging them by inventoryDate keeps the whole
         # stream newest first, so --limit takes the newest cars of all ranges (not of the first)
         # and the first car older than --max-age means every car still to come is older too.
-        # heapq.merge pulls lazily: one page per range up front, then only as needed.
-        ranges = [self._results(conditions, price)
-                  for conditions in self.condition_groups for price in self._partitions(conditions)]
+        # Blocks of detail_batch listings, but no bigger than the run needs (--limit 2: blocks of 2).
+        block_size = min([self.detail_batch] + [n for n in (limit, self.run_limit) if n])
         seen: set[str] = set()
+        block: list[Listing] = []
         for car in heapq.merge(*ranges, key=lambda c: c.get("inventoryDate") or "", reverse=True):
             vid = str(car.get("vehicleId") or "")
             if not vid or vid in seen:
                 continue
             seen.add(vid)
             listed_at = to_datetime(car.get("inventoryDate"))
-            yield Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car, listed_at=listed_at)
-            if limit is not None and len(seen) >= limit:
+            block.append(Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car, listed_at=listed_at))
+            last = (limit is not None and len(seen) >= limit) or bool(
+                self.listed_since and listed_at and listed_at < self.listed_since)   # run_site: too old
+            if len(block) >= block_size or last:
+                yield from self._yield_block(block)
+                block = []
+            if last:
                 return
-            if self.listed_since and listed_at and listed_at < self.listed_since:
-                return                                # run_site counts this one as too old
+        yield from self._yield_block(block)
+
+    def _yield_block(self, block: list[Listing]) -> Iterator[Listing]:
+        """Yield a block of listings; parse() fetches their details together (``_pending``)."""
+        self._pending, self._details = list(block), {}
+        for listing in block:
+            yield listing
+            self._pending.remove(listing)
+
+    # -- details ---------------------------------------------------------------
+
+    def _fetch_details(self, ids: list[str]) -> dict:
+        """Details of ``ids`` in one GraphQL request; a car that isn't found maps to None."""
+        r = self.client.post(GRAPHQL_URL, json={"query": detail_query(len(ids)),
+                                                "variables": {f"c{i}": v for i, v in enumerate(ids)}},
+                             headers={**self._headers(), "Ocp-Apim-Subscription-Key": self._key})
+        data = r.json()
+        if not isinstance(data.get("data"), dict):
+            errors = "; ".join(e.get("message", "") for e in data.get("errors") or [])
+            raise ValueError(f"detail request failed: {errors or 'empty answer'}")
+        return {v: data["data"].get(f"c{i}") for i, v in enumerate(ids)}
+
+    def _detail(self, vehicle_id: str) -> dict:
+        if vehicle_id not in self._details:
+            ids = [vehicle_id] + [l.listing_id for l in self._pending
+                                  if l.listing_id != vehicle_id and l.listing_id not in self._details]
+            ids = ids[:self.detail_batch]
+            try:
+                self._details.update(self._fetch_details(ids))
+            except (BlockedError, DisallowedError):
+                raise
+            except Exception as e:  # noqa: BLE001 - e.g. a 502 on a big query: go one by one
+                if len(ids) == 1:
+                    raise
+                self.log.warning("batch of %d details failed (%s); one car per request from now on",
+                                 len(ids), e)
+                self.detail_batch = 1
+                self._details.update(self._fetch_details([vehicle_id]))
+        car = self._details.pop(vehicle_id, None)
+        if not car:
+            raise ValueError(f"no details for vehicle {vehicle_id} (sold?)")
+        return car
 
     # -- parsing ---------------------------------------------------------------
     def parse(self, listing: Listing) -> VehicleRecord:
         b = RecordBuilder(self.name, listing.url, listing.listing_id)
         car = listing.payload or {}
+        detail = self._detail(listing.listing_id)
         # Most reliable sources first: the first value set for a field wins.
         b.set("make", car.get("make"))
         b.set("model", car.get("model"))
@@ -133,15 +217,13 @@ class DrivewayScraper(HtmlSiteScraper):
         b.set("price", car.get("price"))
         b.set("currency", "USD")
         b.set("mileage_km", car.get("mileage"), "mi")
-        b.set("fuel_type", car.get("fuel"))
+        b.add_pairs([("Body", detail.get("bodyStyle")), ("Doors", detail.get("doors")),
+                     ("Engine", detail.get("engine")), ("Fuel Type", detail.get("fuel") or car.get("fuel")),
+                     ("Transmission", detail.get("transmission")), ("Drive Type", detail.get("driveType"))])
         mpg = car.get("mpg") or {}
         if mpg.get("combined"):
             b.set("fuel_economy_kml", mpg["combined"], "mpg")
-        if self.cfg.use_browser:
-            soup = X.soup_of(self.fetch_html(listing.url, self.wait_selector))
-            if soup.select_one(self.spec_selector):     # not the whole page: payment calculator noise
-                X.apply_html(b, soup, self.spec_selector)
-            else:
-                b.warn("vehicle details section not found on the rendered page")
-        b.add_title(car.get("trim"))                    # "Crew Cab 4x4": body/drivetrain tokens only
+        for group in detail.get("categoryFeatures") or []:
+            b.add_feature_list(group.get("features") or [])
+        b.add_title(car.get("trim"), detail.get("cabStyle"))   # "Crew Cab", "4x4": body/drive tokens
         return self.finish(b.build())

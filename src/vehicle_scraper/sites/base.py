@@ -55,6 +55,9 @@ class SiteScraper(ABC):
     # Set by `run --max-age` before discover(): the cutoff (UTC). run_site applies it either way;
     # a scraper whose discovery is sorted newest-first may also use it to stop paging early.
     listed_since: Optional[datetime] = None
+    # The run's --limit (None = whole site). Under --max-age discover() is called without a limit,
+    # since run_site keeps going until `limit` listings pass the filter.
+    run_limit: Optional[int] = None
 
     def __init__(self, cfg: Settings = default_settings, client: Optional[PoliteClient] = None):
         self.cfg = cfg

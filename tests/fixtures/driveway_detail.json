@@ -1,0 +1,141 @@
+{
+ "data": {
+  "getVehicleById": {
+   "bodyStyle": "SUV",
+   "bedStyle": null,
+   "cabStyle": null,
+   "doors": 4,
+   "engine": "4 Cyl",
+   "transmission": "AUTOMATIC",
+   "driveType": "AWD",
+   "fuel": "Gas",
+   "mpg": {
+    "highway": 29,
+    "city": 23
+   },
+   "categoryFeatures": [
+    {
+     "category": "Safety",
+     "features": [
+      "Aerial View Display System",
+      "Automatic Parking",
+      "Back-Up Camera",
+      "Blind Spot Monitor",
+      "Brake Assist",
+      "Child Safety Locks",
+      "Cross-Traffic Alert",
+      "Cruise Control",
+      "Driver Air Bag",
+      "Engine Immobilizer",
+      "Front Head Air Bag",
+      "Front Side Air Bag",
+      "Heads-Up Display",
+      "Passenger Air Bag",
+      "Rear Head Air Bag",
+      "Rear Parking Aid",
+      "Security System",
+      "Stability Control",
+      "Tire Pressure Monitor",
+      "Traction Control"
+     ]
+    },
+    {
+     "category": "Comfort",
+     "features": [
+      "A/C",
+      "Adjustable Steering Wheel",
+      "Auto-Dimming Rearview Mirror",
+      "Bucket Seats",
+      "Climate Control",
+      "Driver Adjustable Lumbar",
+      "Heated Mirrors",
+      "Heated Seats",
+      "Keyless Entry",
+      "Keyless Start",
+      "Leather Seats",
+      "Mirror Memory",
+      "Multi-Zone A/C",
+      "Passenger Adjustable Lumbar",
+      "Power Driver Seat",
+      "Power Mirror(s)",
+      "Power Passenger Seat",
+      "Rear A/C",
+      "Seat Memory",
+      "Universal Garage Door Opener"
+     ]
+    },
+    {
+     "category": "Entertainment",
+     "features": [
+      "AM/FM Stereo",
+      "Auxiliary Audio Input",
+      "Bluetooth",
+      "MP3 Player",
+      "Navigation System",
+      "Satellite Radio",
+      "Smart Device Integration",
+      "Steering Wheel Audio Controls",
+      "WiFi Hotspot"
+     ]
+    },
+    {
+     "category": "Interior",
+     "features": [
+      "Driver Illuminated Vanity Mirror",
+      "Driver Vanity Mirror",
+      "Floor Mats",
+      "Leather Steering Wheel",
+      "Pass-Through Rear Seat",
+      "Passenger Illuminated Visor Mirror",
+      "Passenger Vanity Mirror",
+      "Power Door Locks",
+      "Power Windows",
+      "Trip Computer",
+      "Woodgrain Interior Trim"
+     ]
+    },
+    {
+     "category": "Exterior",
+     "features": [
+      "Automatic Headlights",
+      "Automatic Highbeams",
+      "Chrome Wheels",
+      "Daytime Running Lights",
+      "Fog Lamps",
+      "Headlights-Auto-Leveling",
+      "Integrated Turn Signal Mirrors",
+      "Intermittent Wipers",
+      "LED Headlights",
+      "Power Liftgate",
+      "Privacy Glass",
+      "Rain Sensing Wipers",
+      "Rear Defrost",
+      "Rear Spoiler",
+      "Remote Trunk Release",
+      "Steel Wheels",
+      "Tow Hitch",
+      "Variable Speed Intermittent Wipers"
+     ]
+    },
+    {
+     "category": "Mechanical",
+     "features": [
+      "4 Cylinder Engine",
+      "4-Wheel Disc Brakes",
+      "8-Speed A/T",
+      "ABS",
+      "All Wheel Drive",
+      "Brake Actuated Limited Slip Differential",
+      "Gasoline Fuel",
+      "Power Steering",
+      "Telematics",
+      "Tires - Front All-Season",
+      "Tires - Rear All-Season",
+      "Transmission w/Dual Shift Mode",
+      "Turbo/Supercharged"
+     ]
+    }
+   ]
+  }
+ }
+}

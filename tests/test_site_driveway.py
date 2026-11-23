@@ -1,34 +1,69 @@
 """Driveway: discovery through the site's search API sorted newest-first (inventoryDate is the
-listing date), split by price when a query has more results than it can page through."""
+listing date), split by price when a query has more results than it can page through; details
+(overview + equipment lists) from the car page's GraphQL query."""
+import json as jsonlib
 from json import dumps as json_dumps
 from datetime import date, datetime, timedelta, timezone
 
-from vehicle_scraper.config import Settings
+import pytest
+from requests import HTTPError
+
 from vehicle_scraper.http import Response
 from vehicle_scraper.sites.base import Listing
 from vehicle_scraper.sites.driveway import DrivewayScraper
 
 from .conftest import FIXTURES
 
+# The real answer for 88551660 (VIN and dealership weren't asked for)
+DETAIL = jsonlib.loads((FIXTURES / "driveway_detail.json").read_text(encoding="utf-8"))["data"]["getVehicleById"]
+
 CAR = {   # one search result as the API returns it (VIN and dealership left out on purpose)
-    "vehicleId": "85895316", "year": 2021, "make": "BMW", "model": "X4", "trim": "M40i",
-    "condition": "USED", "mileage": 83047, "price": 27000.0, "priceWithFees": 27799.0,
-    "inventoryDate": "2026-11-18", "fuel": "Gas", "exteriorColor": {"name": "Black"},
-    "mpg": {"city": 21, "combined": 23, "highway": 27},
+    "vehicleId": "88551660", "year": 2021, "make": "BMW", "model": "X3", "trim": "XDrive30i",
+    "condition": "USED", "mileage": 69500, "price": 23400.0, "priceWithFees": 23750.0,
+    "inventoryDate": "2026-11-21", "fuel": "Gas", "exteriorColor": {"name": "White"},
+    "mpg": {"city": 23, "combined": 25, "highway": 29},
 }
-EXPECTED = {
+EXPECTED = {   # search result + driveway_detail.json (overview and every equipment list)
     'source_site': 'driveway',
-    'source_url': 'https://www.driveway.com/shop/vehicle/85895316',
-    'listing_id': '85895316',
-    'price': 27000.0,
+    'source_url': 'https://www.driveway.com/shop/vehicle/88551660',
+    'listing_id': '88551660',
+    'price': 23400.0,
     'currency': 'USD',
-    'mileage_km': 133651,
+    'mileage_km': 111849,
+    'vehicle_type': 'SUV',
     'make': 'BMW',
-    'model': 'X4',
-    'trim': 'M40i',
+    'model': 'X3',
+    'trim': 'XDrive30i',
     'model_year': 2021,
+    'body_style': 'SUV',
+    'engine_cylinders': 4,                  # "Engine": "4 Cyl"
     'fuel_type': 'Gasoline',
-    'fuel_economy_kml': 9.8,
+    'transmission_type': 'Automatic',
+    'drivetrain': 'AWD',
+    'doors': 4,
+    'fuel_economy_kml': 10.6,               # 25 mpg combined
+    'abs': True,
+    'stability_control': True,
+    'traction_control': True,
+    'blind_spot_monitoring': True,
+    'led_lights': True,
+    'fog_lights': True,
+    'leather_seats': True,
+    'power_seats': True,
+    'heated_seats': True,
+    'memory_seats': True,
+    'climate_control': True,
+    'dual_zone_ac': True,
+    'keyless_entry': True,
+    'push_button_start': True,
+    'bluetooth': True,
+    'navigation': True,
+    'reverse_camera': True,
+    'parking_sensors': True,
+    'automatic_parking': True,
+    'alarm': True,
+    'immobilizer': True,
+    'tow_package': True,
 }
 
 
@@ -51,12 +86,25 @@ class FakeApi:
     """The search endpoint: filters by condition and inclusive price range, newest first,
     and errors past ``window`` results like the real one."""
 
-    def __init__(self, cars, window=10_000):
-        self.cars, self.window, self.bodies = cars, window, []
+    def __init__(self, cars, window=10_000, known=None, max_batch=100):
+        self.cars, self.window, self.bodies, self.details = cars, window, [], []
+        self.known = set(known if known is not None else ["88551660"]) | {c["vehicleId"] for c in cars}
+        self.max_batch = max_batch                      # bigger detail batches answer 502
         self.session = type("S", (), {"headers": {}})()
         self.robots_exempt: set[str] = set()
 
     def post(self, url, json=None, **kw):
+        if "graphql" in url:                            # the car page's detail query, batched
+            ids = [json["variables"][f"c{i}"] for i in range(len(json["variables"]))]
+            self.details.append(ids)
+            if len(ids) > self.max_batch:
+                raise HTTPError(f"HTTP 502 for {url}")
+            data, errors = {}, []
+            for i, vid in enumerate(ids):
+                data[f"c{i}"] = DETAIL if vid in self.known else None
+                if vid not in self.known:
+                    errors.append({"message": f"Could not find vehicle with vehicleId: {vid}", "path": [f"c{i}"]})
+            return Response(url, 200, json_dumps({"data": data, **({"errors": errors} if errors else {})}), {})
         self.bodies.append(json)
         conds = set(json["filters"]["vehicleConditions"])
         rng = json["filters"].get("priceWithFeesRange")
@@ -68,12 +116,6 @@ class FakeApi:
         body = {"exactMatch": {"results": hits[skip:skip + items],
                                "pageInfo": {"skip": skip, "items": items, "totalItems": len(hits)}}}
         return Response(url, 200, json_dumps(body), {})
-
-    def get(self, url, **kw):
-        assert "/shop/vehicle/" in url, url
-        return Response(url, 200, (FIXTURES / "driveway_vehicle.html").read_text(encoding="utf-8"), {})
-
-    render = get
 
     def close(self):
         pass
@@ -138,27 +180,95 @@ def test_limit_takes_newest_across_price_ranges(cfg):
     assert got == [70000.0, 60000.0, 50000.0]
 
 
-def test_parse_from_search_result_without_fetching(cfg):
+def test_full_run_fetches_the_whole_list_before_parsing(cfg):
+    # Pages fetched lazily over days would shift as cars are sold; a run without --limit takes
+    # the list up front.
+    api = FakeApi(_inventory(n_used=9, n_new=0))
+    stream = _scraper(cfg, api, page_size=2).discover()
+    next(stream)
+    used_pages = [b for b in api.bodies if b["filters"]["vehicleConditions"] == ["CPO", "USED"]
+                  and b["pagination"]["items"] == 2]
+    assert len(used_pages) == 5                         # all 9 cars before the first one is parsed
+
+
+def test_max_age_with_limit_pages_lazily(cfg):
+    # run_site calls discover() without a limit under --max-age; the run's --limit still means
+    # "not a full run", so the list isn't fetched up front.
+    api = FakeApi(_inventory(n_used=9, n_new=0))
+    s = _scraper(cfg, api, page_size=2, run_limit=2,
+                 listed_since=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    stream = s.discover()
+    next(stream)
+    used_pages = [b for b in api.bodies if b["filters"]["vehicleConditions"] == ["CPO", "USED"]
+                  and b["pagination"]["items"] == 2]
+    assert len(used_pages) == 1
+
+
+def test_parse_search_result_plus_graphql_details(cfg):
     api = FakeApi([])
-    s = _scraper(cfg, api)
-    assert _fields(s.parse(_listing(CAR))) == EXPECTED
-    assert api.bodies == []                             # nothing fetched without --browser
-
-
-def test_parse_with_browser_adds_specs_and_equipment(tmp_path):
-    cfg = Settings(data_dir=tmp_path, request_delay_s=0, use_browser=True)
-    rec = _scraper(cfg, FakeApi([])).parse(_listing(CAR))
-    got = _fields(rec)
-    assert {k: got[k] for k in EXPECTED} == EXPECTED    # API values are kept
-    assert rec.body_style == "SUV" and rec.transmission_type == "Automatic"
-    assert rec.engine_cylinders == 6 and rec.engine_displacement_l is None   # "Engine: 6 Cyl"
-    assert rec.drivetrain == "AWD"
-    assert rec.blind_spot_monitoring and rec.keyless_entry and rec.stability_control
+    rec = _scraper(cfg, api).parse(_listing(CAR))
+    assert api.details == [["88551660"]]
+    assert _fields(rec) == EXPECTED
     assert rec.parse_warnings == []
 
 
-def test_fixture_has_no_vin():
-    assert "5UX2V5C06M9E78199" not in (FIXTURES / "driveway_vehicle.html").read_text(encoding="utf-8")
+def test_sold_car_is_an_error_not_a_bare_record(cfg):
+    with pytest.raises(ValueError, match="no details"):
+        _scraper(cfg, FakeApi([])).parse(_listing({**CAR, "vehicleId": "1"}))
+
+
+def test_detail_query_asks_for_no_vin_or_dealership():
+    from vehicle_scraper.sites.driveway import detail_query
+    q = detail_query(3)
+    assert "vin" not in q.split() and "dealership" not in q
+    assert "c2: getVehicleById(id: $c2)" in q
+
+
+def _run(scraper, skip=()):
+    """What run_site does: parse each discovered listing unless it is already stored."""
+    out = []
+    for listing in scraper.discover():
+        if listing.listing_id not in skip:
+            out.append(scraper.parse(listing))
+    return out
+
+
+def test_details_fetched_in_batches(cfg):
+    api = FakeApi(_inventory(n_used=7, n_new=0))
+    recs = _run(_scraper(cfg, api, detail_batch=3))
+    assert len(recs) == 7 and all(r.body_style == "SUV" for r in recs)
+    assert api.details == [["100", "101", "102"], ["103", "104", "105"], ["106"]]
+
+
+def test_stored_cars_are_not_fetched_on_their_own(cfg):
+    api = FakeApi(_inventory(n_used=6, n_new=0))
+    _run(_scraper(cfg, api, detail_batch=3), skip={"100", "103", "104", "105"})
+    # 100 is skipped before anything is asked; 101 asks for itself and the rest of its block;
+    # the second block is all stored: no request at all.
+    assert api.details == [["101", "102"]]
+
+
+def test_a_sold_car_fails_alone_in_its_batch(cfg):
+    api = FakeApi(_inventory(n_used=3, n_new=0))
+    api.known.discard("101")
+    s = _scraper(cfg, api, detail_batch=3)
+    stream = s.discover()
+    assert s.parse(next(stream)).listing_id == "100"
+    with pytest.raises(ValueError, match="no details for vehicle 101"):
+        s.parse(next(stream))
+    assert s.parse(next(stream)).listing_id == "102"
+    assert api.details == [["100", "101", "102"]]          # one request for the three
+
+
+def test_failed_batch_falls_back_to_one_car_per_request(cfg):
+    api = FakeApi(_inventory(n_used=3, n_new=0), max_batch=1)
+    recs = _run(_scraper(cfg, api, detail_batch=3))
+    assert len(recs) == 3
+    assert api.details == [["100", "101", "102"], ["100"], ["101"], ["102"]]
+
+
+def test_default_page_and_batch_sizes():
+    assert DrivewayScraper.page_size == 500 and DrivewayScraper.detail_batch == 50
 
 
 def _listing(car):
