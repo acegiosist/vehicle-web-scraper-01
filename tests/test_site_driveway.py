@@ -93,8 +93,10 @@ def _fields(rec):
 def test_discover_newest_first_with_inventory_date(cfg):
     api = FakeApi(_inventory())
     listings = list(_scraper(cfg, api, page_size=2).discover())
-    assert [l.listing_id for l in listings[:5]] == ["100", "101", "102", "103", "104"]   # used first
     assert len(listings) == 12
+    dates = [l.listed_at for l in listings]
+    assert dates == sorted(dates, reverse=True)         # used and new interleaved, newest first
+    assert {l.listing_id for l in listings[:2]} == {"100", "200"}   # both from 22 Nov
     assert listings[0].listed_at == datetime(2026, 11, 22, tzinfo=timezone.utc)
     assert listings[0].url == "https://www.driveway.com/shop/vehicle/100"
     assert all(b["sort"] == "INVENTORY_NEWEST" for b in api.bodies)
@@ -123,6 +125,17 @@ def test_big_group_is_split_by_price_and_deduped(cfg):
     ranges = {tuple(b["filters"]["priceWithFeesRange"].values()) for b in api.bodies
               if "priceWithFeesRange" in b["filters"]}
     assert ranges and all(lo >= 0 and hi <= 80000 for lo, hi in ranges)
+
+
+def test_limit_takes_newest_across_price_ranges(cfg):
+    # The cheapest new cars are the oldest: the newest 3 sit in the dearer ranges.
+    cars = _inventory(n_used=0, n_new=7)
+    for c in cars:
+        c["inventoryDate"] = (date(2026, 11, 22) - timedelta(days=int(70000 - c["price"]) // 10000)).isoformat()
+    api = FakeApi(cars, window=3)
+    s = _scraper(cfg, api, page_size=2, max_window=3, price_range=(0, 80000))
+    got = [l.payload["price"] for l in s.discover(limit=3)]
+    assert got == [70000.0, 60000.0, 50000.0]
 
 
 def test_parse_from_search_result_without_fetching(cfg):

@@ -8,6 +8,7 @@ at the user's request, through PoliteClient like everything else.
 * Results are sorted "Newest Inventory" (``INVENTORY_NEWEST``) and each one carries its
   ``inventoryDate``, used as ``listed_at``: ``run --max-age`` filters on it like on the other
   sites, and paging stops at the first car older than the cutoff (the rest are older still).
+  The query ranges below are merged by date, so the stream stays newest first as a whole.
 * The API fails (HTTP 502) past ~30,000 results per query, so a group of conditions bigger than
   ``max_window`` is split into price ranges until each fits. Range bounds are inclusive, so cars
   priced exactly on a bound show up twice and are dropped as duplicates by ``vehicleId``.
@@ -18,6 +19,7 @@ at the user's request, through PoliteClient like everything else.
 """
 from __future__ import annotations
 
+import heapq
 import os
 from typing import Iterator, Optional
 
@@ -100,21 +102,24 @@ class DrivewayScraper(HtmlSiteScraper):
                 return
 
     def discover(self, limit: Optional[int] = None) -> Iterator[Listing]:
+        # Every range is sorted newest first; merging them by inventoryDate keeps the whole
+        # stream newest first, so --limit takes the newest cars of all ranges (not of the first)
+        # and the first car older than --max-age means every car still to come is older too.
+        # heapq.merge pulls lazily: one page per range up front, then only as needed.
+        ranges = [self._results(conditions, price)
+                  for conditions in self.condition_groups for price in self._partitions(conditions)]
         seen: set[str] = set()
-        for conditions in self.condition_groups:
-            for price in self._partitions(conditions):
-                for car in self._results(conditions, price):
-                    vid = str(car.get("vehicleId") or "")
-                    if not vid or vid in seen:
-                        continue
-                    seen.add(vid)
-                    listed_at = to_datetime(car.get("inventoryDate"))
-                    yield Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car,
-                                  listed_at=listed_at)
-                    if limit is not None and len(seen) >= limit:
-                        return
-                    if self.listed_since and listed_at and listed_at < self.listed_since:
-                        break                         # newest first: the rest of this range is older
+        for car in heapq.merge(*ranges, key=lambda c: c.get("inventoryDate") or "", reverse=True):
+            vid = str(car.get("vehicleId") or "")
+            if not vid or vid in seen:
+                continue
+            seen.add(vid)
+            listed_at = to_datetime(car.get("inventoryDate"))
+            yield Listing(vid, f"{self.base_url}/shop/vehicle/{vid}", payload=car, listed_at=listed_at)
+            if limit is not None and len(seen) >= limit:
+                return
+            if self.listed_since and listed_at and listed_at < self.listed_since:
+                return                                # run_site counts this one as too old
 
     # -- parsing ---------------------------------------------------------------
     def parse(self, listing: Listing) -> VehicleRecord:
