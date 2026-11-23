@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { validateFieldValue } from "./fields";
 import { allowedDecisions, type Decision, issueInfo } from "./issues";
+import { VEHICLE_CLASSES } from "./knowledge";
 
 export const decisionFormSchema = z.object({
   itemId: z.string().regex(/^\d{1,18}$/, "Caso inválido."),
@@ -41,6 +42,14 @@ export function checkDecision(item: CaseForValidation, form: DecisionForm): Chec
     if (!item.field) return { ok: false, error: "Este caso no tiene un campo que corregir." };
     const v = validateFieldValue(item.field, raw);
     return v.ok ? { ok: true, decision: "corrected", corrected: v.value, note } : { ok: false, error: v.error };
+  }
+  // "split:" / "split:heavy": the model is a family, the version's leading number is the model
+  // (mirrors apply_decision in src/vehicle_scraper/kb/review.py)
+  if (kind === "model_name" && raw.toLowerCase().startsWith("split:")) {
+    const cls = raw.slice(6).trim().toLowerCase();
+    return cls === "" || (VEHICLE_CLASSES as readonly string[]).includes(cls)
+      ? { ok: true, decision: "corrected", corrected: `split:${cls}`, note }
+      : { ok: false, error: "Clase de vehículo inválida." };
   }
   if (kind === "model_name" && raw.toLowerCase().startsWith("merge:")) {
     const target = raw.slice(6).trim();

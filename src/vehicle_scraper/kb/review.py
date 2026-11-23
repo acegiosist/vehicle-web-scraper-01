@@ -10,7 +10,9 @@ Policy (decided):
 
 Decisions in the CSV: ``approve`` (the proposal / flagged value is right), ``reject`` (it is
 wrong) or ``correct`` (wrong; ``corrected_value`` holds the right one). Nothing is applied
-until import, and every decision keeps the reviewer's name.
+until import, and every decision keeps the reviewer's name. For a model, ``corrected_value``
+may also be ``merge:<existing model>`` or ``split:[car|motorcycle|heavy]`` (the model is a
+family: the number at the start of each version is the real model, e.g. LV + "150 Bus").
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from .identity import merge_make, merge_model, merge_trim, split_trim
 
 COLUMNS = ["item_id", "level", "kind", "batch_id", "entity_type", "entity_id", "entity", "country", "field",
            "issue", "current", "proposed", "evidence", "listings_affected", "decision", "corrected_value", "note"]
+VEHICLE_CLASSES = ("car", "motorcycle", "heavy")
 DECISIONS = {"approve": "approved", "approved": "approved", "ok": "approved", "si": "approved", "sí": "approved",
              "reject": "rejected", "rejected": "rejected", "no": "rejected",
              "correct": "corrected", "corrected": "corrected", "corregir": "corrected"}
@@ -217,6 +220,15 @@ def apply_decision(conn, item: dict, decision: str, corrected: Optional[str], re
             conn.execute("UPDATE kb.model SET status = 'rejected', verified_by = %s WHERE id = %s", (verified_by, eid))
             return
         model = conn.execute("SELECT * FROM kb.model WHERE id = %s", (eid,)).fetchone()
+        if corrected and corrected.lower().startswith("split:"):
+            # a family ("LV"): the number at the start of each version is the model (LV 150,
+            # LV 452). kb normalize moves the listings; the family itself stays as it is.
+            vclass = corrected[6:].strip().lower() or None
+            if vclass not in (None, *VEHICLE_CLASSES):
+                raise InvalidValue(f"vehicle class: {vclass!r}")
+            conn.execute("UPDATE kb.model SET split_by_number = true, vehicle_class = COALESCE(%s, vehicle_class), "
+                         "verified_by = %s, updated_at = now() WHERE id = %s", (vclass, verified_by, eid))
+            return
         if corrected and corrected.lower().startswith("merge:"):
             target = conn.execute("SELECT id FROM kb.model m JOIN kb.model_alias a ON a.model_id = m.id "
                                   "WHERE a.make_id = %s AND a.alias_key = %s", (model["make_id"], compact_key(corrected[6:])))

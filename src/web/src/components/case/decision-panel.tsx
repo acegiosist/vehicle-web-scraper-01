@@ -12,6 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { type DecideState, submitDecision } from "@/lib/actions/decide";
 import { type FieldSpec, validateFieldValue } from "@/lib/fields";
 import { type CorrectionKind, type Decision, DECISION_LABELS } from "@/lib/issues";
+import { VEHICLE_CLASSES, vehicleClassLabel } from "@/lib/knowledge";
+import type { SplitPreview } from "@/lib/queries/case";
 
 const ICONS: Record<Decision, typeof CheckCircle2> = {
   approved: CheckCircle2,
@@ -27,6 +29,7 @@ interface Props {
   correction: CorrectionKind | undefined;
   field: { name: string; label: string; spec: FieldSpec } | null;
   targets: string[];
+  split: SplitPreview | null;
   hasReviewer: boolean;
   nextHref: string | null;
 }
@@ -35,7 +38,17 @@ function isTyping(el: EventTarget | null) {
   return el instanceof HTMLElement && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 }
 
-export function DecisionPanel({ itemId, allowed, effects, correction, field, targets, hasReviewer, nextHref }: Props) {
+export function DecisionPanel({
+  itemId,
+  allowed,
+  effects,
+  correction,
+  field,
+  targets,
+  split,
+  hasReviewer,
+  nextHref,
+}: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -121,7 +134,14 @@ export function DecisionPanel({ itemId, allowed, effects, correction, field, tar
       </fieldset>
 
       {decision === "corrected" && (
-        <CorrectionInput key={correction} kind={correction} field={field} targets={targets} id={`${ids}-corrected`} />
+        <CorrectionInput
+          key={correction}
+          kind={correction}
+          field={field}
+          targets={targets}
+          split={split}
+          id={`${ids}-corrected`}
+        />
       )}
 
       <div className="space-y-1">
@@ -168,15 +188,19 @@ function CorrectionInput({
   kind,
   field,
   targets,
+  split,
   id,
 }: {
   kind: CorrectionKind | undefined;
   field: Props["field"];
   targets: string[];
+  split: SplitPreview | null;
   id: string;
 }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const [name, setName] = useState("");
+  const [splitting, setSplitting] = useState(false);
+  const [splitClass, setSplitClass] = useState("");
 
   if (kind === "field" && field) {
     const { spec, label } = field;
@@ -232,10 +256,62 @@ function CorrectionInput({
   }
 
   const listId = `${id}-targets`;
-  const value = kind === "model_name" && mergeTarget ? `merge:${mergeTarget}` : name;
+  const value =
+    kind === "model_name" && splitting
+      ? `split:${splitClass}`
+      : kind === "model_name" && mergeTarget
+        ? `merge:${mergeTarget}`
+        : name;
+  const keptClass = vehicleClassLabel(split?.vehicleClass);
   return (
     <div className="space-y-3">
       <input type="hidden" name="corrected" value={value} />
+      {kind === "model_name" && split && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={splitting}
+              onChange={(e) => setSplitting(e.target.checked)}
+              className="mt-1 accent-foreground"
+            />
+            <span>
+              <span className="font-medium">Es una familia: dividir por el número de la versión</span>
+              <span className="block text-xs text-muted-foreground">
+                El número al inicio de la versión es parte del modelo. Al recalcular, cada anuncio pasa a su modelo y la
+                versión queda sin el número.
+              </span>
+            </span>
+          </label>
+          {splitting && (
+            <>
+              <ul className="space-y-0.5 text-sm" aria-label="Modelos que se crearán">
+                {split.models.map((m) => (
+                  <li key={m.name} className="flex justify-between gap-2">
+                    <span>{m.name}</span>
+                    <span className="text-muted-foreground">
+                      {m.listings} {m.listings === 1 ? "anuncio" : "anuncios"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="space-y-1">
+                <label htmlFor={`${id}-class`} className="text-sm">
+                  Clase de vehículo
+                </label>
+                <NativeSelect id={`${id}-class`} value={splitClass} onChange={(e) => setSplitClass(e.target.value)}>
+                  <option value="">Mantener{keptClass ? ` (${keptClass.toLowerCase()})` : ""}</option>
+                  {VEHICLE_CLASSES.map((c) => (
+                    <option key={c} value={c}>
+                      {vehicleClassLabel(c)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <div className="space-y-1">
         <label htmlFor={id} className="text-sm">
           {kind === "make_name" ? "Nombre correcto de la marca" : "Nombre canónico"}
@@ -250,7 +326,7 @@ function CorrectionInput({
           list={kind === "make_name" ? listId : undefined}
           maxLength={80}
           autoFocus
-          disabled={!!mergeTarget}
+          disabled={!!mergeTarget || splitting}
         />
         {kind === "make_name" && (
           <>
@@ -268,7 +344,12 @@ function CorrectionInput({
           <label htmlFor={`${id}-merge`} className="text-sm">
             …o fusionar con un modelo existente
           </label>
-          <NativeSelect id={`${id}-merge`} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+          <NativeSelect
+            id={`${id}-merge`}
+            value={mergeTarget}
+            onChange={(e) => setMergeTarget(e.target.value)}
+            disabled={splitting}
+          >
             <option value="">No fusionar</option>
             {targets.map((t) => (
               <option key={t} value={t}>

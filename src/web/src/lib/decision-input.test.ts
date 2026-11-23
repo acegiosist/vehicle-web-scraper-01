@@ -59,4 +59,22 @@ describe("checkDecision", () => {
       ok: false,
     });
   });
+
+  it("splits a model family by version number, optionally setting its class", () => {
+    expect(checkDecision(model, { itemId: "1", decision: "corrected", corrected: "split:" })).toMatchObject({
+      ok: true,
+      corrected: "split:",
+    });
+    expect(checkDecision(model, { itemId: "1", decision: "corrected", corrected: "split: Heavy" })).toMatchObject({
+      ok: true,
+      corrected: "split:heavy",
+    });
+    expect(checkDecision(model, { itemId: "1", decision: "corrected", corrected: "split:truck" })).toMatchObject({
+      ok: false,
+    });
+    // only models can be split: for a make it is just an (invalid) name
+    expect(checkDecision(make, { itemId: "1", decision: "corrected", corrected: "split:" })).toMatchObject({
+      ok: false,
+    });
+  });
 });

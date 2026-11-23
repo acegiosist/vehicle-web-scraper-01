@@ -42,6 +42,8 @@ export function verifiedLabel(verified: string | null | undefined): string {
   return VERIFIED[verified] ?? verified;
 }
 
+/** kb.model.vehicle_class (CHECK in migration 0001). */
+export const VEHICLE_CLASSES = ["car", "motorcycle", "heavy"] as const;
 const CLASSES: Record<string, string> = { car: "Carro", motorcycle: "Moto", heavy: "Pesado" };
 
 export function vehicleClassLabel(cls: string | null | undefined): string | null {

@@ -79,7 +79,8 @@ export const ISSUES: Record<string, IssueInfo> = {
     effects: {
       approved: "Es un modelo real: se acepta y se aplica la propuesta (nombre, clase, años, fusión o marca correcta).",
       rejected: "No es un modelo real: sus anuncios quedan fuera de la base.",
-      corrected: "Escribe el nombre canónico, o elige un modelo existente para fusionarlo con él.",
+      corrected:
+        "Escribe el nombre canónico, elige un modelo existente para fusionarlo con él, o divídelo si el número de la versión es parte del modelo (LV + 150 = LV 150).",
     },
     correction: "model_name",
   },

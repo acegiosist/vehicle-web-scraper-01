@@ -6,7 +6,8 @@ import pytest
 pytest.importorskip("psycopg")
 
 from vehicle_scraper.kb.db import compact_key
-from vehicle_scraper.kb.identity import display_name, load_seed, similar, split_model, split_trim
+from vehicle_scraper.kb.identity import (display_name, load_seed, load_split_seed, similar, split_model,
+                                         split_number, split_trim)
 
 
 @pytest.mark.parametrize("raw, name, attrs", [
@@ -62,3 +63,27 @@ def test_seed_has_unique_keys():
             assert key not in seen, f"{alias} clashes with {seen[key]}"
             seen[key] = m["name"]
         assert m.get("class", "car") in ("car", "motorcycle", "heavy")
+
+
+@pytest.mark.parametrize("label, out", [
+    ("150 Bus", ("150", "Bus")),
+    ("452", ("452", None)),
+    ("390 NG", ("390", "NG")),
+    ("SF 250 FI", (None, "SF 250 FI")),        # the number must come first
+    ("5 Puertas", (None, "5 Puertas")),         # one digit is not a model number
+    ("20000", (None, "20000")),
+    (None, (None, None)),
+])
+def test_split_number(label, out):
+    assert split_number(label) == out
+
+
+def test_split_seed_points_at_seeded_makes():
+    makes = {compact_key(a) for m in load_seed() for a in [m["name"], *(m.get("aliases") or [])]}
+    seen = set()
+    for s in load_split_seed():
+        assert compact_key(s["make"]) in makes, s
+        key = (compact_key(s["make"]), compact_key(s["model"]))
+        assert key not in seen, s
+        seen.add(key)
+        assert s.get("class", "car") in ("car", "motorcycle", "heavy")

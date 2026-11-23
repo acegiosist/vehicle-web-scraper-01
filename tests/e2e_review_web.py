@@ -40,7 +40,7 @@ def records() -> list[VehicleRecord]:
     # 6 listings (5+ makes the model "known"); seats 3 vs 3 -> listings_disagree
     rows = [rec(f"tr{i}", "Chevrolet", "Tracker", "1.8 FWD LS Mecanica", **base,
                 seats=5 if i <= 3 else 7, horsepower_hp=138) for i in range(1, 7)]
-    rows += [rec("z1", "Zzzmotors", "Thing")]                                          # unknown make
+    rows += [rec("z1", "Zzzmotors", "Thing", "150 Bus")]       # unknown make; its model can be split
     return rows
 
 

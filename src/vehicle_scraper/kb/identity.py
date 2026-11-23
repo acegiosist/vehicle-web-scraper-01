@@ -96,6 +96,18 @@ def split_trim(raw: Optional[str]) -> Optional[str]:
     return label or None
 
 
+_MODEL_NUMBER = re.compile(r"^\d{2,4}$")
+
+
+def split_number(label: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Leading model number of a (cleaned) trim label: '150 Bus' -> ('150', 'Bus'),
+    '452' -> ('452', None), 'LS 150' -> (None, 'LS 150'). Used only for split families."""
+    toks = _tokens(label)
+    if toks and _MODEL_NUMBER.match(toks[0]):
+        return toks[0], " ".join(toks[1:]) or None
+    return None, label
+
+
 def display_name(spellings: Counter) -> str:
     """Most frequent spelling, preferring one that isn't ALL CAPS; an all-caps name is
     title-cased word by word, except short or alphanumeric tokens (GTI, CX-30, RAV4)."""
@@ -116,6 +128,47 @@ def similar(a: str, b: str) -> bool:
 # --- seed ---------------------------------------------------------------------------------
 def load_seed(path: Path = SEED_PATH) -> list[dict]:
     return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("makes") or []
+
+
+def load_split_seed(path: Path = SEED_PATH) -> list[dict]:
+    """``split_models`` of makes.yaml: families whose version starts with the model number."""
+    return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("split_models") or []
+
+
+@dataclass
+class _Family:
+    """A model name that is only a family: the listing's version starts with the real model's
+    number (Chevrolet "LV" + "150 Bus" = LV 150). See migration 0007."""
+    name: str
+    model_id: Optional[int]          # the family's own model row, when it exists
+    vehicle_class: Optional[str]     # inherited by the split models
+    verified_by: str                 # what the split models are accepted as: 'human' or 'seed'
+
+
+def _split_families(conn, make_alias: dict, model_alias: dict, seed: list[dict]) -> dict[tuple[int, str], _Family]:
+    """(make_id, alias_key) -> family: models a reviewer split (``split_by_number``) plus the
+    curated ``split_models``, under every alias of the family model."""
+    aliases: dict[int, set[str]] = defaultdict(set)
+    for (make_id, key), model_id in model_alias.items():
+        aliases[model_id].add(key)
+    fams: dict[tuple[int, str], _Family] = {}
+    for r in conn.execute("SELECT id, make_id, name, vehicle_class FROM kb.model "
+                          "WHERE split_by_number AND merged_into IS NULL"):
+        fam = _Family(r["name"], r["id"], r["vehicle_class"], "human")
+        for key in aliases[r["id"]] | {compact_key(r["name"])}:
+            fams[(r["make_id"], key)] = fam
+    for s in seed:
+        make_id = make_alias.get(compact_key(s.get("make")))
+        key = compact_key(s.get("model"))
+        if make_id is None or not key:
+            log.warning("split_models: unknown make or empty model in %r", s)
+            continue
+        model_id = model_alias.get((make_id, key))
+        row = model_id and conn.execute("SELECT vehicle_class FROM kb.model WHERE id = %s", (model_id,)).fetchone()
+        fam = _Family(str(s["model"]).strip(), model_id, s.get("class") or (row and row["vehicle_class"]), "seed")
+        for k in aliases.get(model_id, set()) | {key}:
+            fams.setdefault((make_id, k), fam)       # a reviewer's split wins over the seed
+    return fams
 
 
 def seed_makes(conn, seed: list[dict]) -> dict[str, str]:
@@ -154,6 +207,10 @@ class _Listing:
     excluded: Optional[str] = None
     model_name: str = ""
     trim_label: Optional[str] = None
+    db_model_id: Optional[int] = None      # where the listing was before this run
+    db_variant_id: Optional[int] = None
+    family: Optional[_Family] = None       # set when the listing goes to "<family> <number>"
+    trim_rest: Optional[str] = None        # its trim label without that number
 
 
 @dataclass
@@ -170,12 +227,14 @@ def _load_listings(conn) -> list[_Listing]:
     rows = conn.execute(
         """SELECT l.source_site, l.listing_id, l.raw_make, l.raw_model, l.raw_trim, l.raw_year,
                   r.row->>'vehicle_type' AS vehicle_type,
-                  (r.row->>'engine_displacement_l')::float AS displacement, r.row->>'fuel_type' AS fuel
+                  (r.row->>'engine_displacement_l')::float AS displacement, r.row->>'fuel_type' AS fuel,
+                  l.model_id, l.variant_id
            FROM kb.listing l JOIN staging.raw_listing r
              ON r.source_site = l.source_site AND r.listing_id = l.listing_id AND r.version = l.current_version
            ORDER BY l.source_site, l.listing_id""").fetchall()
     return [_Listing(r["source_site"], r["listing_id"], r["raw_make"], r["raw_model"], r["raw_trim"],
-                     r["raw_year"], r["vehicle_type"], r["displacement"], r["fuel"]) for r in rows]
+                     r["raw_year"], r["vehicle_type"], r["displacement"], r["fuel"],
+                     db_model_id=r["model_id"], db_variant_id=r["variant_id"]) for r in rows]
 
 
 def open_review(conn, *, level: int, entity_type: str, entity_id: int, issue: str, source: str,
@@ -274,21 +333,33 @@ def normalize(conn, seed_path: Path = SEED_PATH, now_year: Optional[int] = None)
     # ---- 2. models -----------------------------------------------------------------------
     model_alias = {(r["make_id"], r["alias_key"]): r["model_id"]
                    for r in conn.execute("SELECT make_id, alias_key, model_id FROM kb.model_alias")}
+    families = _split_families(conn, make_alias, model_alias, load_split_seed(seed_path))
     groups: dict[tuple[int, str], list[_Listing]] = defaultdict(list)
     for l in listings:
         if l.make_id is None:
             continue
         clean, _ = split_model(l.raw_model)
         l.model_name = clean
-        if not compact_key(clean):
+        key = compact_key(clean)
+        if not key:
             l.excluded = "no_model"
             continue
-        groups[(l.make_id, compact_key(clean))].append(l)
+        fam = families.get((l.make_id, key)) or families.get((l.make_id, compact_key(l.raw_model)))
+        if fam:                                   # "LV" + "150 Bus" -> model "LV 150", trim "Bus"
+            number, rest = split_number(split_trim(l.raw_trim))
+            if number:
+                l.family, l.trim_rest, l.model_name = fam, rest, f"{fam.name} {number}"
+                key = compact_key(l.model_name)
+        groups[(l.make_id, key)].append(l)
 
+    split_models: dict[int, _Family] = {}
     for (make_id, key), group in groups.items():
+        # a split listing's raw spelling is the family's: never an alias of the split model
+        raw_keys = {compact_key(l.raw_model) for l in group if not l.family}
+        fam = next((l.family for l in group if l.family), None)
         model_id = model_alias.get((make_id, key))
         if model_id is None:                      # a raw spelling may already be an alias
-            for raw_key in {compact_key(l.raw_model) for l in group}:
+            for raw_key in raw_keys:
                 model_id = model_alias.get((make_id, raw_key)) or model_id
         if model_id is None:
             name = display_name(Counter(l.model_name for l in group))
@@ -297,15 +368,18 @@ def normalize(conn, seed_path: Path = SEED_PATH, now_year: Optional[int] = None)
                 slug = f"{slug}-{key}"
             mk_class = classes.get(makes[make_id]["slug"], "car")
             model_id = conn.execute(
-                """INSERT INTO kb.model (make_id, name, slug, vehicle_class) VALUES (%s, %s, %s, %s)
+                """INSERT INTO kb.model (make_id, name, slug, vehicle_class, split_from) VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (make_id, slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id""",
-                (make_id, name, slug, _vehicle_class(group, mk_class))).fetchone()["id"]
+                (make_id, name, slug, (fam and fam.vehicle_class) or _vehicle_class(group, mk_class),
+                 fam and fam.model_id)).fetchone()["id"]
             stats.models_new += 1
-        for alias in {key} | {compact_key(l.raw_model) for l in group}:
+        for alias in {key} | raw_keys:
             if alias and (make_id, alias) not in model_alias:
                 conn.execute("INSERT INTO kb.model_alias (make_id, alias_key, model_id, source) "
                              "VALUES (%s, %s, %s, 'rule') ON CONFLICT DO NOTHING", (make_id, alias, model_id))
                 model_alias[(make_id, alias)] = model_id
+        if fam:
+            split_models[model_id] = fam
         for l in group:
             l.model_id = model_id
 
@@ -324,7 +398,12 @@ def normalize(conn, seed_path: Path = SEED_PATH, now_year: Optional[int] = None)
         md = models[model_id]
         strong = len(group) >= STRONG_LISTINGS or len({l.site for l in group}) >= 2
         make_ok = makes[md["make_id"]]["status"] == "accepted"
-        if md["status"] == "unresolved" and md["verified_by"] == "unverified" and strong and make_ok:
+        fam = split_models.get(model_id)
+        if md["status"] == "unresolved" and md["verified_by"] == "unverified" and fam and make_ok:
+            # a person (review) or the curated seed already said the family's numbers are models
+            conn.execute("UPDATE kb.model SET status = 'accepted', verified_by = %s, updated_at = now() "
+                         "WHERE id = %s", (fam.verified_by, model_id))
+        elif md["status"] == "unresolved" and md["verified_by"] == "unverified" and strong and make_ok:
             conn.execute("UPDATE kb.model SET status = 'accepted', verified_by = 'multi_source', updated_at = now() "
                          "WHERE id = %s", (model_id,))
         elif md["status"] == "unresolved" and not _decided(conn, "model", model_id, "unresolved_model"):
@@ -346,7 +425,7 @@ def normalize(conn, seed_path: Path = SEED_PATH, now_year: Optional[int] = None)
     tgroups: dict[tuple[int, str], list[_Listing]] = defaultdict(list)
     for l in listings:
         if l.model_id:
-            l.trim_label = split_trim(l.raw_trim)
+            l.trim_label = l.trim_rest if l.family else split_trim(l.raw_trim)
             if l.trim_label and compact_key(l.trim_label):
                 tgroups[(l.model_id, compact_key(l.trim_label))].append(l)
     for (model_id, key), group in tgroups.items():
@@ -369,6 +448,19 @@ def normalize(conn, seed_path: Path = SEED_PATH, now_year: Optional[int] = None)
                          "WHERE id = %s AND status = 'unresolved' AND verified_by = 'unverified'", (trim_id,))
         for l in group:
             l.trim_id = trim_id
+
+    # ---- 3b. listings that just left a family take its variants along -----------------------
+    # (with their human/AI evidence), the same way a merge does; listing evidence is rebuilt
+    # by consolidate anyway.
+    targets: dict[int, set] = defaultdict(set)
+    for l in listings:
+        if l.db_variant_id:
+            moved = l.family is not None and l.model_id != l.db_model_id
+            targets[l.db_variant_id].add((l.model_id, l.trim_id) if moved else None)
+    moves = {vid: next(iter(t)) for vid, t in targets.items() if len(t) == 1 and None not in t}
+    if moves:
+        from .consensus import move_variants
+        move_variants(conn, moves, "split by version number")
 
     # ---- 4. years ------------------------------------------------------------------------
     for l in listings:

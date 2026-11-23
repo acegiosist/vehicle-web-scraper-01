@@ -140,3 +140,26 @@ makes:
   - {name: Vespa, country: Italy, class: motorcycle}
   - {name: Victory, country: Colombia, class: motorcycle}
   - {name: Yamaha, country: Japan, class: motorcycle}
+
+# Model families: the portal puts the real model's number at the start of the version
+# (KTM "Duke" + "390 NG" = Duke 390, version NG). `kb normalize` sends each listing whose
+# version starts with a 2-4 digit number to "<model> <number>" (created and accepted on
+# demand, with this spelling); listings without that number stay on the family. Only list a
+# model when the number really is part of the model name: Mercedes "Clase C" + "180" or
+# Mazda "BT-50" + "2200" are versions, not models. A reviewer can mark more families from
+# the review site ("Dividir por número de versión"). class: optional, for the split models.
+split_models:
+  - {make: AKT, model: CR4}
+  - {make: AKT, model: TT}
+  - {make: AKT, model: TTR}
+  - {make: Bajaj, model: Pulsar}
+  - {make: Benelli, model: TRK}
+  - {make: DFSK, model: Glory}
+  - {make: Honda, model: CBF}
+  - {make: Honda, model: XR}
+  - {make: KTM, model: Adventure}
+  - {make: KTM, model: Duke}
+  - {make: Suzuki, model: DR}
+  - {make: Suzuki, model: Gixxer}
+  - {make: Toyota, model: Land Cruiser}
+  - {make: Yamaha, model: XTZ}

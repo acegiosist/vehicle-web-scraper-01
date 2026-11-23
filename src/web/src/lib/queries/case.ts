@@ -125,6 +125,34 @@ export async function publishedValue(item: ReviewCase["item"]): Promise<unknown>
   return row?.value;
 }
 
+export interface SplitPreview {
+  models: { name: string; listings: number }[];
+  vehicleClass: string | null;
+}
+
+/** Models a "split by version number" decision would create for a model case: one per number
+ * at the start of the listings' versions ("150 Bus" -> LV 150). Approximates `kb normalize`
+ * (identity.split_number), which also drops noise tokens first. Null when nothing would split. */
+export async function splitPreview(item: ReviewCase["item"]): Promise<SplitPreview | null> {
+  await io();
+  if (item.entity_type !== "model" || !item.entity_id || !item.model_name) return null;
+  const num = sql<string>`substring(l.raw_trim from '^[[:space:]]*([0-9]{2,4})([[:space:]]|$)')`;
+  const rows = await getDb()
+    .selectFrom("kb.listing as l")
+    .select([num.as("num"), sql<string>`count(*)`.as("n")])
+    .where("l.model_id", "=", item.entity_id)
+    .where(num, "is not", null)
+    .groupBy(sql`1`)
+    .orderBy(sql`count(*)`, "desc")
+    .limit(30)
+    .execute();
+  if (rows.length === 0) return null;
+  return {
+    models: rows.map((r) => ({ name: `${item.model_name} ${r.num}`, listings: Number(r.n) })),
+    vehicleClass: item.vehicle_class,
+  };
+}
+
 /** Existing names a correction can point to: accepted makes, or accepted models of the make. */
 export async function correctionTargets(item: ReviewCase["item"]): Promise<string[]> {
   await io();

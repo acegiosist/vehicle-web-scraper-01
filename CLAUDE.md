@@ -202,6 +202,9 @@ Things to keep in sync:
 - `src/web/src/generated/kb-fields.json` comes from `kb fields-json` (`fields.fields_catalog`);
   `tests/test_kb_fields_json.py` fails when it is stale. `src/web/src/generated/db.d.ts` comes
   from `pnpm db:types` after a migration.
+- The model correction markers (`merge:`, `split:`) are parsed in `review.apply_decision` and
+  validated in `src/web/src/lib/decision-input.ts`; `queries/case.ts:splitPreview` approximates
+  `identity.split_number` for the preview. Change them together.
 - Job parameters are validated twice: `src/web/src/lib/jobs.ts` (Zod) and `worker.execute_job`.
   A new command needs both, plus the CHECK in the migration and `COMMAND_LABELS`.
 - After a migration, re-run `docs/sql/review_web_grants.sql` (the site's role) and `pnpm db:types`.
@@ -222,7 +225,8 @@ in pipeline order:
   `0001_kb_schema`, `0002_review_web` (decision inbox, `review_queue` view), `0003_web_jobs`
   (`job`, `job_file`, `cancel_job()`), `0004_queue_ai_origin` (`review_queue.from_ai`/`ai_run_id`),
   `0005_ai_run_cost` (`ai_run.actual_cost_usd`, `cache_write_tokens`), `0006_ai_run_batch_check`
-  (`ai_run.batch_checked_at`, `batch_counts`; status `ended` = finished, not collected).
+  (`ai_run.batch_checked_at`, `batch_counts`; status `ended` = finished, not collected),
+  `0007_model_split` (`model.split_by_number`, `split_from`).
 - **`import [--sqlite data/vehicles.sqlite]`**: copies listings into `staging.raw_listing`,
   opening the file read-only.
   - A file whose sha256 was already imported is skipped.
@@ -232,6 +236,11 @@ in pipeline order:
 - **`normalize`**: rule-based identity (make, model, trim, year), free.
   - Resolves spellings through aliases (`compact_key`) and `config/kb/makes.yaml`.
   - `split_model`/`split_trim` move attribute tokens ("4X4", "Diesel", "2.8") to the variant.
+  - Model families (`model.split_by_number`, set by a `split:` decision, or `split_models` in
+    makes.yaml): a version starting with a 2-4 digit number sends the listing to "<family>
+    <number>" (CarroYa "LV" + "150 Bus" = LV 150, trim "Bus"), created and accepted on demand
+    with `split_from`; the family's variants (and their human/AI evidence) move along through
+    `consensus.move_variants`. Listings without the number stay on the family.
   - What the rules can't settle becomes `pending_review` plus a `review_item`.
 - **`consolidate [--min-support 2] [--min-agreement 0.7]`**: builds the spec sheets.
   - Builds variants, and clusters the same car across portals so it counts as one vote.
@@ -272,6 +281,8 @@ in pipeline order:
     `accepted_sampled`. Otherwise the whole batch is rejected.
   - A correction that doesn't parse or is out of range is counted as `invalid_value` and the
     case stays pending.
+  - For a model, `corrected_value` may be a name, `merge:<existing model>`, or
+    `split:[car|motorcycle|heavy]` (a family split by version number; optional class).
   - Then run `normalize` and `consolidate` to propagate the decisions.
 - **`worker [--propagate-idle 120] [--poll 30] [--batch-check 300] [--once]`** (alias `review worker`): applies the
   decisions the review website queues in `kb.review_decision` and runs its jobs from `kb.job`

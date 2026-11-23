@@ -640,6 +640,15 @@ def merge_variants_of_model(conn, src: int, dst: int, reason: str) -> None:
     _rekey(conn, rows, dst, None, reason, trim_map)
 
 
+def move_variants(conn, moves: dict[int, tuple[int, Optional[int]]], reason: str) -> None:
+    """variant id -> (model, trim) it now belongs to (a family split by version number).
+    A variant whose new key already exists folds into it, keeping human/AI evidence."""
+    for vid, (model_id, trim_id) in moves.items():
+        row = conn.execute("SELECT * FROM kb.variant WHERE id = %s", (vid,)).fetchone()
+        if row:
+            _rekey(conn, [row], model_id, None, reason, {row["trim_id"]: trim_id})
+
+
 def merge_variants_of_trim(conn, src: int, dst: int, reason: str) -> None:
     rows = conn.execute("SELECT * FROM kb.variant WHERE trim_id = %s", (src,)).fetchall()
     model = conn.execute("SELECT model_id FROM kb.trim WHERE id = %s", (dst,)).fetchone()["model_id"]

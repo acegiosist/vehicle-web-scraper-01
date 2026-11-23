@@ -30,9 +30,11 @@ import {
   correctionTargets,
   getCase,
   publishedValue,
+  splitPreview,
   valueDistribution,
 } from "@/lib/queries/case";
 import { nextCaseId } from "@/lib/queries/queue";
+import { vehicleClassLabel } from "@/lib/knowledge";
 import { getReviewer } from "@/lib/reviewer";
 
 export const metadata: Metadata = { title: "Caso" };
@@ -54,16 +56,17 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
   if (!found) notFound();
   const { item, decisions } = found;
   const field = caseField(item);
-  const [listings, distribution, published, targets, nextId, reviewer] = await Promise.all([
+  const info = issueInfo(item.issue);
+  const [listings, distribution, published, targets, split, nextId, reviewer] = await Promise.all([
     caseListings(item),
     valueDistribution(item),
     publishedValue(item),
     correctionTargets(item),
+    info.correction === "model_name" ? splitPreview(item) : null,
     nextCaseId(filters, id),
     getReviewer(),
   ]);
 
-  const info = issueInfo(item.issue);
   const latest = decisions[0];
   const nextHref = nextId ? caseHref(nextId, filters) : null;
   const pending = item.status === "pending";
@@ -186,6 +189,7 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
                       : null
                   }
                   targets={targets}
+                  split={split}
                   hasReviewer={!!reviewer}
                   nextHref={nextHref}
                 />
@@ -197,7 +201,7 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
                 <CardContent className="text-sm">
                   Decidido: <strong>{statusLabel(item.status)}</strong>
                   {item.reviewer ? ` por ${item.reviewer}` : ""} · {formatDate(item.decided_at)}
-                  {item.corrected_value !== null && <> · valor: {formatValue(item.field, item.corrected_value)}</>}
+                  {item.corrected_value !== null && <> · {correctedText(item.field, item.corrected_value)}</>}
                 </CardContent>
               </Card>
             )
@@ -223,6 +227,16 @@ async function CaseView({ params, searchParams }: PageProps<"/cola/[id]">) {
       </div>
     </div>
   );
+}
+
+/** A decided correction in words: identity markers (`merge:`, `split:`) are not values. */
+function correctedText(field: string | null, value: unknown): string {
+  if (typeof value === "string" && value.startsWith("merge:")) return `fusionado con ${value.slice(6)}`;
+  if (typeof value === "string" && value.startsWith("split:")) {
+    const cls = vehicleClassLabel(value.slice(6));
+    return `dividido por número de versión${cls ? ` (clase ${cls.toLowerCase()})` : ""}`;
+  }
+  return `valor: ${formatValue(field, value)}`;
 }
 
 /** ", confianza 60 %" when the AI proposal carries a confidence (0..1). */

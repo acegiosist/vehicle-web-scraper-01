@@ -276,6 +276,14 @@ export interface KbModel {
   merged_into: Int8 | null;
   name: string;
   slug: string;
+  /**
+   * Family name: the number at the start of each listing's version is part of the model (LV + 150 = LV 150).
+   */
+  split_by_number: Generated<boolean>;
+  /**
+   * The family this model was split from by kb normalize (NULL: not a split model).
+   */
+  split_from: Int8 | null;
   status: Generated<string>;
   updated_at: Generated<Timestamp>;
   vehicle_class: string | null;

@@ -5,8 +5,10 @@ Base PostgreSQL (versión 15 o superior) creada por las migraciones Alembic
 [`0002_review_web`](../migrations/versions/0002_review_web.py) (bandeja de decisiones del sitio de
 revisión `src/web`), [`0003_web_jobs`](../migrations/versions/0003_web_jobs.py) (tareas que el sitio
 encola), [`0004_queue_ai_origin`](../migrations/versions/0004_queue_ai_origin.py) (origen IA en la
-cola) y [`0005_ai_run_cost`](../migrations/versions/0005_ai_run_cost.py) (costo real de cada corrida de
-IA). La alimentan los anuncios de `data/vehicles.sqlite`, que se abre siempre en
+cola), [`0005_ai_run_cost`](../migrations/versions/0005_ai_run_cost.py) (costo real de cada corrida de
+IA), [`0006_ai_run_batch_check`](../migrations/versions/0006_ai_run_batch_check.py) (aviso de lotes
+terminados) y [`0007_model_split`](../migrations/versions/0007_model_split.py) (familias de modelos
+divididas por el número de la versión). La alimentan los anuncios de `data/vehicles.sqlite`, que se abre siempre en
 solo lectura.
 
 | Esquema | Para qué |
@@ -55,6 +57,7 @@ erDiagram
     model ||--o{ trim_alias : "ámbito"
     trim ||--o{ trim_alias : "grafías"
     model |o--o{ model : "merged_into"
+    model |o--o{ model : "split_from"
     trim |o--o{ trim : "merged_into"
 
     model ||--o{ variant : "configuraciones"
@@ -133,6 +136,8 @@ erDiagram
         text status
         text verified_by
         bigint merged_into FK
+        bool split_by_number
+        bigint split_from FK
     }
     model_alias {
         bigint make_id PK
@@ -426,6 +431,8 @@ Grafías de una marca. Una grafía nueva agrega una fila aquí, nunca una marca 
 | `status` | text | no | `unresolved` | Solo los modelos `accepted` pasan a consolidación (la espera es por entidad). |
 | `verified_by` | text | no | `unverified` | |
 | `merged_into` | bigint | sí | | FK → `model.id`. Si se fusionó, apunta al modelo que quedó. |
+| `split_by_number` | boolean | no | false | Familia: el número al inicio de la versión es parte del modelo ("LV" + "150 Bus" = LV 150). Lo marca una decisión `split:` o `split_models` de `config/kb/makes.yaml`; `kb normalize` manda cada anuncio con número a "<familia> <número>" y deja en la familia los que no lo tienen. |
+| `split_from` | bigint | sí | | FK → `model.id`. La familia de la que salió este modelo. |
 | `created_at`, `updated_at` | timestamptz | no | now() | |
 
 ### `kb.model_alias`
@@ -689,7 +696,7 @@ Cada decisión tomada en el sitio web (`src/web`). El sitio solo inserta aquí; 
 | `id` | bigint | no | serial | PK. |
 | `review_item_id` | bigint | no | | FK → `review_item.id` (`ON DELETE CASCADE`). |
 | `decision` | text | no | | `approved`, `rejected` o `corrected`. |
-| `corrected_value` | text | sí | | Valor correcto (máx. 500). Obligatorio si `decision = corrected`. Para fusionar un modelo: `merge:<nombre>`. |
+| `corrected_value` | text | sí | | Valor correcto (máx. 500). Obligatorio si `decision = corrected`. Para fusionar un modelo: `merge:<nombre>`. Para dividir una familia por el número de la versión: `split:` o `split:<car|motorcycle|heavy>` (cambia también la clase). |
 | `note` | text | sí | | Nota del revisor (máx. 2000). |
 | `reviewer` | text | no | | Quién decidió (1 a 100 caracteres). |
 | `status` | text | no | 'queued' | `queued` (esperando al worker), `applied`, `failed` (ver `error`) o `superseded` (el caso ya estaba decidido). |

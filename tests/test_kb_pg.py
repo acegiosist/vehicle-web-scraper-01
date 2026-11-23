@@ -132,7 +132,7 @@ def test_consensus_rules_crosschecks_and_idempotency(db, tmp_path):
         assert g310["status"] == "pending_review"
         assert conn.execute("SELECT count(*) AS n FROM kb.review_item WHERE issue = 'name_vs_displacement'").fetchone()["n"] == 1
         pulsar = conn.execute("""SELECT v.status, s.horsepower_hp FROM kb.variant v JOIN kb.model m ON m.id = v.model_id
-                                 JOIN kb.variant_spec s ON s.variant_id = v.id WHERE m.name = 'Pulsar'""").fetchone()
+                                 JOIN kb.variant_spec s ON s.variant_id = v.id WHERE m.name = 'Pulsar 200'""").fetchone()  # split_models
         assert (pulsar["status"], pulsar["horsepower_hp"]) == ("accepted", 24)
         assert consensus.consolidate(conn).changes == 0                             # idempotent
 
@@ -237,6 +237,86 @@ def test_merging_models_cascades(db, tmp_path):
         consensus.consolidate(conn)
         assert conn.execute("SELECT count(DISTINCT model_id) AS n FROM kb.listing").fetchone()["n"] == 1
         assert conn.execute("SELECT horsepower_hp FROM kb.variant_spec").fetchone()["horsepower_hp"] == 170
+
+
+def _models(conn, make):
+    return {r["name"]: r for r in conn.execute(
+        "SELECT m.* FROM kb.model m JOIN kb.make k ON k.id = m.make_id WHERE k.name = %s", (make,))}
+
+
+def test_review_splits_a_family_by_version_number(db, tmp_path):
+    # CarroYa: model "LV", the truck's number at the start of the version
+    rows = [rec("carroya", "lv1", "Chevrolet", "LV", 2006, "150 Bus"),
+            rec("carroya", "lv2", "Chevrolet", "LV", 2019, "452"),
+            rec("carroya", "lv3", "Chevrolet", "LV", 2020, "452 4x2"),
+            rec("carroya", "lv4", "Chevrolet", "LV", 2018)]                           # no number: stays
+    pipeline(db, sqlite_with(tmp_path / "a.sqlite", rows))
+    with connect(db) as conn:
+        lv = _models(conn, "Chevrolet")["LV"]
+        case = conn.execute("SELECT id FROM kb.review_item WHERE issue = 'unresolved_model' AND entity_id = %s",
+                            (lv["id"],)).fetchone()["id"]
+        assert review.decide_item(conn, case, "corrected", "split:truck", None, "ana") == "invalid_value"
+        assert review.decide_item(conn, case, "corrected", "split:heavy", None, "ana") == "corrected"
+        identity.normalize(conn)
+        consensus.consolidate(conn)
+    with connect(db) as conn:
+        models = _models(conn, "Chevrolet")
+        assert {"LV", "LV 150", "LV 452"} <= set(models)
+        for name in ("LV 150", "LV 452"):
+            m = models[name]
+            assert (m["status"], m["verified_by"], m["vehicle_class"], m["split_from"]) == \
+                   ("accepted", "human", "heavy", lv["id"])
+        assert models["LV"]["split_by_number"] and models["LV"]["status"] == "unresolved"
+        where = {r["listing_id"]: (r["model"], r["trim"]) for r in conn.execute(
+            """SELECT l.listing_id, m.name AS model, t.name AS trim FROM kb.listing l
+               JOIN kb.model m ON m.id = l.model_id LEFT JOIN kb.trim t ON t.id = l.trim_id""")}
+        assert where == {"lv1": ("LV 150", "Bus"), "lv2": ("LV 452", None), "lv3": ("LV 452", None),
+                         "lv4": ("LV", None)}
+        # the split models reach the knowledge base; the family's raw spelling never aliases them
+        assert conn.execute("SELECT count(DISTINCT v.model_id) AS n FROM kb.variant v JOIN kb.listing l "
+                            "ON l.variant_id = v.id").fetchone()["n"] == 2
+        assert not conn.execute("SELECT 1 FROM kb.model_alias WHERE alias_key = 'lv' AND model_id <> %s",
+                                (lv["id"],)).fetchone()
+        before = conn.execute("SELECT (SELECT count(*) FROM kb.model) AS m, (SELECT count(*) FROM kb.review_item) AS r").fetchone()
+        identity.normalize(conn)                                                        # idempotent
+        consensus.consolidate(conn)
+        assert conn.execute("SELECT (SELECT count(*) FROM kb.model) AS m, (SELECT count(*) FROM kb.review_item) AS r"
+                            ).fetchone() == before
+
+
+def test_seeded_family_takes_its_variants_and_human_values_along(db, tmp_path):
+    import yaml
+    seed = yaml.safe_load(identity.SEED_PATH.read_text(encoding="utf-8"))
+    assert {"make": "KTM", "model": "Duke"} in seed["split_models"]
+    no_split = tmp_path / "makes.yaml"
+    no_split.write_text(yaml.safe_dump({"makes": seed["makes"]}), encoding="utf-8")
+    moto = dict(vehicle_type="Motorcycle", fuel_type="Gasoline")
+    rows = [rec("carroya", f"d{i}", "KTM", "DUKE", 2022, "200 NG", engine_displacement_l=0.2, **moto) for i in range(3)]
+    rows += [rec("carroya", f"e{i}", "KTM", "DUKE", 2022, "390", engine_displacement_l=0.373, **moto) for i in range(3)]
+    with connect(db) as conn:                          # before the family was curated: one model
+        importer.import_sqlite(conn, sqlite_with(tmp_path / "a.sqlite", rows))
+        identity.normalize(conn, seed_path=no_split)
+        consensus.consolidate(conn)
+        duke = _models(conn, "KTM")["Duke"]
+        assert duke["status"] == "accepted"
+        v200 = conn.execute("SELECT v.id FROM kb.variant v JOIN kb.trim t ON t.id = v.trim_id "
+                            "WHERE t.name = '200 NG'").fetchone()["id"]
+        conn.execute("""INSERT INTO kb.spec_evidence (variant_id, country, field, value, source_kind, confidence,
+                        status, origin_key) VALUES (%s, '', 'horsepower_hp', '25', 'manual', 1, 'accepted', 'review:7')""",
+                     (v200,))
+    with connect(db) as conn:                          # now makes.yaml lists it
+        identity.normalize(conn)
+        consensus.consolidate(conn)
+    with connect(db) as conn:
+        models = _models(conn, "KTM")
+        assert models["Duke 200"]["verified_by"] == "seed" and models["Duke 200"]["vehicle_class"] == "motorcycle"
+        assert models["Duke 390"]["split_from"] == duke["id"]
+        v = conn.execute("""SELECT v.id, m.name AS model, t.name AS trim FROM kb.variant v JOIN kb.model m ON m.id = v.model_id
+                            LEFT JOIN kb.trim t ON t.id = v.trim_id WHERE v.id = %s""", (v200,)).fetchone()
+        assert (v["model"], v["trim"]) == ("Duke 200", "NG")                         # same variant, re-keyed
+        assert conn.execute("SELECT horsepower_hp FROM kb.variant_spec WHERE variant_id = %s",
+                            (v200,)).fetchone()["horsepower_hp"] == 25
+        assert conn.execute("SELECT count(*) AS n FROM kb.listing WHERE model_id = %s", (duke["id"],)).fetchone()["n"] == 0
 
 
 # --- review website: decision inbox + worker (migration 0002) ------------------------------------

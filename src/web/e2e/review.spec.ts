@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { signIn } from "./helpers";
 
 // The seed (tests/e2e_review_web.py) opens three cases: an unknown make "Zzzmotors", its model
-// "Thing", and Chevrolet Tracker listings that disagree on the number of seats (3 vs 3).
+// "Thing" (version "150 Bus"), and Chevrolet Tracker listings that disagree on the number of seats (3 vs 3).
 
 test.beforeEach(async ({ page }) => signIn(page));
 
@@ -67,4 +67,21 @@ test("approving a make with the keyboard", async ({ page }) => {
   await page.goto("/cola");
   await expect(page.getByRole("heading", { name: "Cola de revisión" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Zzzmotors", exact: true })).toHaveCount(0); // decided: out of the queue
+});
+
+test("a model family is split by the number at the start of its versions", async ({ page }) => {
+  await page.getByRole("link", { name: "Zzzmotors / Thing" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Thing");
+  await page.locator('input[name="decision"][value="corrected"]').check();
+
+  await page.getByLabel(/Es una familia/).check();
+  const models = page.getByRole("list", { name: "Modelos que se crearán" });
+  await expect(models).toContainText("Thing 150");
+  await expect(models).toContainText("1 anuncio");
+  await expect(page.getByRole("textbox", { name: "Nombre canónico" })).toBeDisabled();
+  await page.getByLabel("Clase de vehículo").selectOption("heavy");
+  await page.getByRole("button", { name: "Enviar decisión" }).click();
+
+  await expect(page.getByText("Aplicada: Corregir por E2E Revisor")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Decidido: Corregido/)).toContainText("dividido por número de versión (clase pesado)");
 });
