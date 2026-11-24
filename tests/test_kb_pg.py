@@ -28,7 +28,9 @@ pytestmark = pytest.mark.skipif(not URL, reason="OMNIBASE_TEST_DATABASE_URL not 
 
 
 @pytest.fixture
-def conn():
+def conn(monkeypatch):
+    # Set (empty) so migration 0008 never picks the developer's own address from .env.
+    monkeypatch.setenv("KB_FIRST_EDITOR_EMAIL", "")
     cfg = alembic_config(URL)
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
@@ -390,3 +392,160 @@ def test_build_publishes_headlights_brakes_and_charger(conn, tmp_path):
                    "FROM kb.commercial_variant WHERE listings > 0") == [("LED", "Disc", "Drum", True)]
     assert q(conn, "SELECT specs->>'headlight_type', specs->>'wireless_charger' FROM kb.clean_listing "
                    "WHERE listing_id = 'a0'") == [("LED", "true")]
+
+
+# --- kb worker (portal inbox) -----------------------------------------------------------------
+import json  # noqa: E402
+import re  # noqa: E402
+
+from vehicle_scraper.kb.worker import drain, run_worker  # noqa: E402
+
+ROLE_SQL = Path(__file__).resolve().parents[1] / "docs" / "sql" / "portal_role.sql"
+
+
+def users(conn, **roles):
+    for email, role in roles.items():
+        conn.execute("INSERT INTO kb.app_user (email, role) VALUES (%s, %s) ON CONFLICT (email) DO UPDATE "
+                     "SET role = EXCLUDED.role", (email.replace("_", ".") + "@x.co", role))
+
+
+def request(conn, kind, payload, by):
+    return q(conn, "INSERT INTO kb.web_action (kind, payload, requested_by) VALUES (%s, %s, %s) RETURNING id",
+             kind, json.dumps(payload), by)[0][0]
+
+
+def action(conn, action_id):
+    return q(conn, "SELECT status, error, result FROM kb.web_action WHERE id = %s", action_id)[0]
+
+
+def test_worker_roles_and_decisions(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
+    recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]
+    built(conn, tmp_path, recs)
+    users(conn, ana="revisor", eva="editor", leo="lector")
+    split = case_id(conn, "generation_split")
+    a1 = request(conn, "decide_case", {"case_id": split, "decision": "corregir", "corrected_value": 2020},
+                 "leo@x.co")                                                       # lector: refused
+    a2 = request(conn, "decide_case", {"case_id": split, "decision": "corregir", "corrected_value": "dos mil"},
+                 "ana@x.co")                                                       # invalid year
+    a3 = request(conn, "decide_case", {"case_id": split, "decision": "corregir", "corrected_value": 2020},
+                 "ana@x.co")
+    a4 = request(conn, "decide_case", {"case_id": split, "decision": "aprobar"}, "ana@x.co")   # already decided
+    a5 = request(conn, "recalculate", {}, "ana@x.co")                              # revisor can't recalculate
+    a6 = request(conn, "recalculate", {}, "nadie@x.co")
+    done = drain(conn)
+    assert [d["status"] for d in done] == ["failed", "failed", "applied", "failed", "failed", "failed"]
+    assert "lector" in action(conn, a1)[1] and "año" in action(conn, a2)[1]
+    assert action(conn, a3)[0] == "applied" and "ya estaba decidido" in action(conn, a4)[1]
+    assert "editor" in action(conn, a5)[1] and "no tiene acceso" in action(conn, a6)[1]
+    assert q(conn, "SELECT decided_by FROM kb.review_item WHERE id = %s", split) == [("ana@x.co",)]
+    # Nothing moves until an editor recalculates.
+    assert q(conn, "SELECT count(*) FROM kb.generation") == [(1,)]
+    a7 = request(conn, "recalculate", {}, "eva@x.co")
+    drain(conn)
+    status, error, result = action(conn, a7)
+    assert status == "applied" and result["build"]["assigned"] == 8
+    assert q(conn, "SELECT year_from, year_to FROM kb.generation ORDER BY id") == [(2017, 2019), (2020, None)]
+
+
+def test_worker_edits(conn, tmp_path):
+    built(conn, tmp_path, [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(5)])
+    users(conn, eva="editor")
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    pid = q(conn, "SELECT id FROM kb.powertrain")[0][0]
+    vid = q(conn, "SELECT id FROM kb.commercial_variant")[0][0]
+    ids = [
+        request(conn, "set_value", {"entity_type": "powertrain", "entity_id": pid, "field": "horsepower_hp",
+                                    "value": "123"}, "eva@x.co"),
+        request(conn, "set_value", {"entity_type": "generation", "entity_id": gid, "field": "length_mm",
+                                    "value": "4300"}, "eva@x.co"),
+        request(conn, "set_value", {"entity_type": "generation", "entity_id": gid, "field": "segment_code",
+                                    "value": "Scooter"}, "eva@x.co"),               # trigger: wrong class
+        request(conn, "set_value", {"entity_type": "generation", "entity_id": gid, "field": "segment_code",
+                                    "value": "Segmento B (pequeño)"}, "eva@x.co"),  # by its Spanish name
+        request(conn, "set_value", {"entity_type": "variant", "entity_id": vid, "field": "headlight_type_code",
+                                    "value": "led"}, "eva@x.co"),
+        request(conn, "set_value", {"entity_type": "variant", "entity_id": vid, "field": "listings",
+                                    "value": "9"}, "eva@x.co"),                      # not editable
+        request(conn, "add_evolution_note", {"variant_id": vid, "field": "wireless_charger", "value": "sí",
+                                             "year_from": 2026}, "eva@x.co"),
+        request(conn, "catalog_upsert", {"table": "segment", "code": "Crossover", "name_es": "Crossover",
+                                         "name_en": "Crossover", "vehicle_class_code": "car"}, "eva@x.co"),
+        request(conn, "catalog_upsert", {"table": "fuel_type", "code": "Hydrogen", "name_es": "Hidrógeno",
+                                         "name_en": "Hydrogen"}, "eva@x.co"),        # tied to the scraper
+        request(conn, "user_upsert", {"email": "Ana@X.co", "role": "revisor"}, "eva@x.co"),
+        request(conn, "user_upsert", {"email": "eva@x.co", "role": "lector"}, "eva@x.co"),   # self-demotion
+    ]
+    drain(conn)
+    got = [action(conn, i)[0] for i in ids]
+    assert got == ["applied", "applied", "failed", "applied", "applied", "failed", "applied", "applied", "failed",
+                   "applied", "failed"]
+    assert "Scooter" in action(conn, ids[2])[1]
+    assert q(conn, "SELECT horsepower_hp FROM kb.powertrain") == [(123,)]
+    assert q(conn, "SELECT length_mm, segment_code FROM kb.generation") == [(4300, "B")]
+    build(conn)                                   # manual evidence survives a rebuild
+    assert q(conn, "SELECT horsepower_hp FROM kb.powertrain") == [(123,)]
+    assert q(conn, "SELECT headlight_type_code FROM kb.commercial_variant") == [("LED",)]
+    assert q(conn, "SELECT field, value, year_from FROM kb.evolution_note") == [("wireless_charger", True, 2026)]
+    assert q(conn, "SELECT role FROM kb.app_user WHERE email = 'ana@x.co'") == [("revisor",)]
+
+
+def test_portal_role_can_only_read_and_request(conn):
+    conn.execute("DROP ROLE IF EXISTS omnibase_portal_test")
+    conn.execute("CREATE ROLE omnibase_portal_test LOGIN PASSWORD 'pt'")
+    db = q(conn, "SELECT current_database()")[0][0]
+    sql = ROLE_SQL.read_text(encoding="utf-8").replace("omnibase_portal", "omnibase_portal_test") \
+        .replace("DATABASE omnibase ", f"DATABASE {db} ")
+    body = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
+    for stmt in (s.strip() for s in body.split(";")):
+        if stmt:
+            conn.execute(stmt)
+    portal_url = re.sub(r"//[^@]+@", "//omnibase_portal_test:pt@", URL)
+    try:
+        with psycopg.connect(portal_url, autocommit=True) as pc:
+            assert pc.execute("SELECT count(*) FROM kb.fuel_type").fetchone()[0] == 6
+            pc.execute("SELECT count(*) FROM staging.raw_listing")
+            pc.execute("INSERT INTO kb.web_action (kind, payload, requested_by) VALUES ('recalculate', '{}', 'a@x.co')")
+            for forbidden in ["UPDATE kb.web_action SET status = 'applied'",
+                              "INSERT INTO kb.web_action (kind, requested_by, status) VALUES ('recalculate', 'a@x.co', 'applied')",
+                              "INSERT INTO kb.app_user (email, role) VALUES ('me@x.co', 'editor')",
+                              "DELETE FROM kb.review_item"]:
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    pc.execute(forbidden)
+    finally:
+        conn.execute("REASSIGN OWNED BY omnibase_portal_test TO CURRENT_USER")
+        conn.execute("DROP OWNED BY omnibase_portal_test")
+        conn.execute("DROP ROLE omnibase_portal_test")
+
+
+def test_worker_listens_and_marks_stale_runs(conn):
+    users(conn, eva="editor")
+    conn.execute("INSERT INTO kb.web_action (kind, requested_by) VALUES ('recalculate', 'eva@x.co')")
+    conn.execute("UPDATE kb.web_action SET status = 'running'")
+    with psycopg.connect(URL, autocommit=True) as wc:
+        assert run_worker(wc, once=True) == []
+    assert q(conn, "SELECT status, error FROM kb.web_action") == [("failed", "el worker se detuvo mientras corría")]
+
+
+def test_first_editor_migration(conn, monkeypatch):
+    cfg = alembic_config(URL)
+    # The fixture ran the migrations without the variable: nobody was created.
+    assert q(conn, "SELECT count(*) FROM kb.app_user") == [(0,)]
+    command.downgrade(cfg, "0007_portal")
+    monkeypatch.setenv("KB_FIRST_EDITOR_EMAIL", "  Primera.Editora@Empresa.com ")
+    monkeypatch.setenv("KB_FIRST_EDITOR_NAME", "Primera Editora")
+    command.upgrade(cfg, "head")
+    assert q(conn, "SELECT email, name, role, active FROM kb.app_user") == [
+        ("primera.editora@empresa.com", "Primera Editora", "editor", True)]
+    # Running it again never changes an existing user.
+    conn.execute("UPDATE kb.app_user SET name = 'Cambiado'")
+    command.downgrade(cfg, "0007_portal")            # still marked as created by the migration: removed
+    assert q(conn, "SELECT count(*) FROM kb.app_user") == [(0,)]
+    command.upgrade(cfg, "head")
+    conn.execute("UPDATE kb.app_user SET updated_by = 'otra@empresa.com'")    # edited from the portal
+    command.downgrade(cfg, "0007_portal")
+    assert q(conn, "SELECT count(*) FROM kb.app_user") == [(1,)]               # kept
+    monkeypatch.setenv("KB_FIRST_EDITOR_EMAIL", "primera.editora@empresa.com")
+    conn.execute("UPDATE kb.app_user SET role = 'lector'")
+    command.upgrade(cfg, "head")
+    assert q(conn, "SELECT role FROM kb.app_user") == [("lector",)]            # existing: left as it is

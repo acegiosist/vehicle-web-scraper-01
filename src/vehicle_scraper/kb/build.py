@@ -178,6 +178,26 @@ def _load(cur, sql: str, args=None) -> list[tuple]:
 
 
 # --- decisions ------------------------------------------------------------------------------
+def split_generation(cur, gen_id: int, year: int) -> Optional[int]:
+    """Cut a generation at ``year``: it ends the year before and a new one (``split_from``)
+    starts at ``year``. Listings move on the next build. Returns the new generation's id, or
+    None when the generation doesn't exist or the year isn't inside its range."""
+    g = _load(cur, "SELECT model_id, body_style_code, name, year_from, year_to, observed_year_from, "
+                   "observed_year_to FROM kb.generation WHERE id = %s", (gen_id,))
+    if not g:
+        return None
+    model_id, body, name, yf, yt, oyf, oyt = g[0]
+    start = yf if yf is not None else oyf
+    if (start is not None and year <= start) or (yt is not None and year > yt):
+        return None
+    cur.execute("UPDATE kb.generation SET year_from = coalesce(year_from, %s), year_to = %s, "
+                "source = 'manual', updated_at = now() WHERE id = %s", (oyf, year - 1, gen_id))
+    cur.execute("INSERT INTO kb.generation (model_id, body_style_code, name, year_from, year_to, source, "
+                "split_from) VALUES (%s, %s, %s, %s, %s, 'manual', %s) RETURNING id",
+                (model_id, body, f"{name} ({year}+)", year, yt, gen_id))
+    return cur.fetchone()[0]
+
+
 def _apply_decisions(cur) -> None:
     # Generation splits: the decided year (or the corrected one) cuts the generation in two.
     for case_id, gen_id, status, proposed, corrected in _load(cur, """
@@ -185,16 +205,7 @@ SELECT r.id, r.entity_key::bigint, r.status, r.proposed_value, r.corrected_value
 WHERE r.issue = 'generation_split' AND r.status IN ('approved', 'corrected')
   AND NOT EXISTS (SELECT 1 FROM kb.generation c WHERE c.split_from = r.entity_key::bigint)"""):
         year = int(((corrected if status == "corrected" else proposed) or {}).get("year_from"))
-        g = _load(cur, "SELECT model_id, body_style_code, name, year_from, year_to, observed_year_from "
-                       "FROM kb.generation WHERE id = %s", (gen_id,))
-        if not g:
-            continue
-        model_id, body, name, yf, yt, oyf = g[0]
-        cur.execute("UPDATE kb.generation SET year_from = coalesce(year_from, %s), year_to = %s, "
-                    "source = 'manual', updated_at = now() WHERE id = %s", (oyf, year - 1, gen_id))
-        cur.execute("INSERT INTO kb.generation (model_id, body_style_code, name, year_from, year_to, source, "
-                    "split_from) VALUES (%s, %s, %s, %s, %s, 'manual', %s)",
-                    (model_id, body, f"{name} ({year}+)", year, yt, gen_id))
+        split_generation(cur, gen_id, year)
     # Corrected or approved values become manual evidence, which no rule overrides.
     for etype, eid, fname, status, proposed, current, corrected, case_id in _load(cur, """
 SELECT entity_type, entity_key::bigint, field, status, proposed_value, current_value, corrected_value, id

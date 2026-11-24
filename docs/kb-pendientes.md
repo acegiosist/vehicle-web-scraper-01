@@ -37,4 +37,18 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 - [ ] Reglas de mantenimiento automáticas al reimportar (años nuevos, cambios de equipamiento,
       cierre de generación).
 - [ ] Exportación de la ficha final (lo que cada anuncio hereda de los tres niveles).
-- [ ] Portal web para revisar y corregir.
+- [ ] Portal web para revisar y corregir (`src/portal`, Next.js + TypeScript, identidad con IAP,
+      roles lector / revisor / editor):
+  - [x] Etapa 1, base y worker (2026-11-24): migración `0007_portal` (usuarios con rol y bandeja
+        `kb.web_action`), `kb worker`, y el rol de base de datos del portal
+        (`docs/sql/portal_role.sql`). Migración aplicada en `omnibase`. Falta crear el rol
+        `omnibase_portal` (lo creas tú, con su contraseña) y correr ese SQL.
+  - [x] Etapa 2, proyecto Next.js (2026-11-24): `src/portal` con la base de la rama vieja,
+        conexión con el rol del portal, verificación de IAP, modo de desarrollo local, roles,
+        encabezado y la página de Estado.
+  - [x] Etapa 3, pantallas (2026-11-24): Estado con botón Recalcular, Revisión (cola y caso),
+        Base (marca, generación con cortar/unir, tren motriz, variante con notas de evolución),
+        edición de valores en las fichas, Catálogos, Usuarios (solo editores) y Acciones.
+        Migración `0009_review_case_view` aplicada en `omnibase`.
+  - [ ] Etapa 4, pruebas de punta a punta con el worker real.
+  - [ ] Despliegue en GCP (Cloud Run, IAP, base): paso aparte.

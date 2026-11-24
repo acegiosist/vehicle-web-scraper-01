@@ -50,6 +50,10 @@ def add_parser(sub) -> None:
     ri.add_argument("--reviewer", required=True, help="who decided (recorded on every case)")
     ri.add_argument("--no-rebuild", action="store_true", help="only save the decisions (no clean + build)")
 
+    w = ksub.add_parser("worker", help="apply the portal's queued actions (kb.web_action)")
+    w.add_argument("--once", action="store_true", help="apply what is queued, then exit")
+    w.add_argument("--poll", type=float, default=30.0, help="seconds between queue checks without a NOTIFY")
+
     ksub.add_parser("status", help="catalogs, sites, imported and cleaned listings, levels")
 
 
@@ -165,6 +169,17 @@ def cmd_review(url: str, args) -> int:
     return 0
 
 
+def cmd_worker(url: str, args) -> int:
+    import psycopg
+    from .db import libpq_url
+    from .worker import run_worker
+    with psycopg.connect(libpq_url(url), autocommit=True) as conn:
+        done = run_worker(conn, once=args.once, poll=args.poll)
+    print(f"Applied {sum(d['status'] == 'applied' for d in done)} actions, "
+          f"{sum(d['status'] == 'failed' for d in done)} failed.")
+    return 0
+
+
 def cmd_status(url: str, args) -> int:
     from .db import connect
     with connect(url) as conn, conn.cursor() as cur:
@@ -224,4 +239,4 @@ def run(args: argparse.Namespace) -> int:
         print(e, file=sys.stderr)
         return 2
     return {"migrate": cmd_migrate, "import": cmd_import, "clean": cmd_clean, "build": cmd_build,
-            "review": cmd_review, "status": cmd_status}[args.kb_cmd](url, args)
+            "review": cmd_review, "worker": cmd_worker, "status": cmd_status}[args.kb_cmd](url, args)

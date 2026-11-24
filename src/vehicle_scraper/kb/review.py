@@ -86,59 +86,21 @@ def _show(value) -> Optional[str]:
     return str(value)
 
 
-def _labels(cur) -> dict[tuple[str, str], tuple[str, Optional[str]]]:
-    """(entity_type, entity_key) -> (readable entity, link) for every pending case."""
-    out = {}
-    queries = {
-        "make": "SELECT r.entity_key, k.name, NULL FROM kb.review_item r JOIN kb.make k ON k.id::text = r.entity_key "
-                "WHERE r.entity_type = 'make' AND r.status = 'pending'",
-        "model": "SELECT r.entity_key, k.name || ' ' || m.name, NULL FROM kb.review_item r "
-                 "JOIN kb.model m ON m.id::text = r.entity_key JOIN kb.make k ON k.id = m.make_id "
-                 "WHERE r.entity_type = 'model' AND r.status = 'pending'",
-        "listing": """
-SELECT r.entity_key, concat_ws(' ', s.data->>'make', s.data->>'model', s.data->>'trim', s.data->>'model_year',
-                               '(' || s.source_site || ':' || s.listing_id || ')'), s.data->>'source_url'
-FROM kb.review_item r JOIN staging.current_listing s ON s.source_site || ':' || s.listing_id = r.entity_key
-WHERE r.entity_type = 'listing' AND r.status = 'pending'""",
-        "generation": """
-SELECT r.entity_key, k.name || ' ' || g.name || ' ' || coalesce(g.observed_year_from::text, '?') || '-'
-                     || coalesce(g.observed_year_to::text, '?'), NULL
-FROM kb.review_item r JOIN kb.generation g ON g.id::text = r.entity_key JOIN kb.model m ON m.id = g.model_id
-JOIN kb.make k ON k.id = m.make_id WHERE r.entity_type = 'generation' AND r.status = 'pending'""",
-        "powertrain": """
-SELECT r.entity_key, k.name || ' ' || g.name || ' / ' || p.match_key, NULL
-FROM kb.review_item r JOIN kb.powertrain p ON p.id::text = r.entity_key JOIN kb.generation g ON g.id = p.generation_id
-JOIN kb.model m ON m.id = g.model_id JOIN kb.make k ON k.id = m.make_id
-WHERE r.entity_type = 'powertrain' AND r.status = 'pending'""",
-        "variant": """
-SELECT r.entity_key, k.name || ' ' || g.name || ' / ' || p.match_key || ' / ' || v.country_code || ' / '
-                     || coalesce(v.trim_name, '(sin versión)'), NULL
-FROM kb.review_item r JOIN kb.commercial_variant v ON v.id::text = r.entity_key
-JOIN kb.powertrain p ON p.id = v.powertrain_id JOIN kb.generation g ON g.id = v.generation_id
-JOIN kb.model m ON m.id = g.model_id JOIN kb.make k ON k.id = m.make_id
-WHERE r.entity_type = 'variant' AND r.status = 'pending'""",
-    }
-    for etype, sql in queries.items():
-        cur.execute(sql)
-        for key, label, link in cur.fetchall():
-            out[(etype, key)] = (label, link)
-    return out
-
-
 def export_review(conn, path: Path, issues: Optional[list[str]] = None, limit: Optional[int] = None) -> dict:
     with conn.cursor() as cur:
-        labels = _labels(cur)
+        # kb.review_case (migration 0009) resolves each entity to readable text, like the portal.
         cur.execute("""
-SELECT id, issue, entity_type, entity_key, field, current_value, proposed_value, listings_affected, evidence
-FROM kb.review_item WHERE status = 'pending' AND (%s::text[] IS NULL OR issue = ANY(%s::text[]))""",
+SELECT id, issue, entity_type, entity_key, field, current_value, proposed_value, listings_affected, evidence,
+       entity_label, link
+FROM kb.review_case WHERE status = 'pending' AND (%s::text[] IS NULL OR issue = ANY(%s::text[]))""",
                     (issues, issues))
         cases = cur.fetchall()
     cases.sort(key=lambda c: (ISSUE_ORDER.index(c[1]) if c[1] in ISSUE_ORDER else 99, -c[7], c[0]))
     if limit:
         cases = cases[:limit]
     rows = []
-    for cid, issue, etype, ekey, fname, current, proposed, n, evidence in cases:
-        label, link = labels.get((etype, ekey), (f"{etype} {ekey}", None))
+    for cid, issue, etype, ekey, fname, current, proposed, n, evidence, label, link in cases:
+        label = label or f"{etype} {ekey}"
         evidence_text = _show(evidence)
         rows.append([cid, issue, ISSUES.get(issue, ("",))[0], label, fname or None, _show(current), _show(proposed),
                      n, evidence_text[:500] if evidence_text else None, link, None, None, None, None])
@@ -254,6 +216,26 @@ def decide(cur, case: dict, decision: str, corrected, klass) -> tuple[str, objec
     return status, parse_value(cur, fname, corrected)
 
 
+def record_decision(cur, case_id: int, decision, corrected, klass, note, reviewer: str) -> str:
+    """Validate and save one decision; the Excel import and the portal worker both use it.
+    Returns the new status, or ``'already_decided'`` (a decided case is never overwritten);
+    raises InvalidDecision when the row doesn't validate (nothing is saved then)."""
+    cur.execute("SELECT issue, entity_type, entity_key, field, status, proposed_value, current_value "
+                "FROM kb.review_item WHERE id = %s FOR UPDATE", (case_id,))
+    found = cur.fetchone()
+    if not found:
+        raise InvalidDecision("el caso no existe")
+    case = dict(zip(("issue", "entity_type", "entity_key", "field", "status", "proposed", "current"), found))
+    if case["status"] != "pending":
+        return "already_decided"
+    status, value = decide(cur, case, decision, corrected, klass)
+    cur.execute("UPDATE kb.review_item SET status = %s, corrected_value = %s, decided_by = %s, "
+                "decided_at = now(), note = %s, updated_at = now() WHERE id = %s",
+                (status, json.dumps(value) if value is not None else None, reviewer.strip(),
+                 str(note) if note not in (None, "") else None, case_id))
+    return status
+
+
 def import_review(conn, path: Path, reviewer: str, rebuild: bool = True) -> dict:
     if not reviewer.strip():
         raise ValueError("reviewer name is required")
@@ -283,26 +265,12 @@ def import_review(conn, path: Path, reviewer: str, rebuild: bool = True) -> dict
             except (TypeError, ValueError):
                 errors.append({"row": n, "error": "id inválido"})
                 continue
-            cur.execute("SELECT issue, entity_type, entity_key, field, status, proposed_value, current_value "
-                        "FROM kb.review_item WHERE id = %s FOR UPDATE", (case_id,))
-            found = cur.fetchone()
-            if not found:
-                errors.append({"row": n, "id": case_id, "error": "el caso no existe"})
-                continue
-            case = dict(zip(("issue", "entity_type", "entity_key", "field", "status", "proposed", "current"), found))
-            if case["status"] != "pending":
-                stats["already_decided"] += 1
-                continue
             try:
-                status, value = decide(cur, case, decision, cell(row, "valor corregido"), cell(row, "clase"))
+                status = record_decision(cur, case_id, decision, cell(row, "valor corregido"), cell(row, "clase"),
+                                         cell(row, "nota"), reviewer)
             except InvalidDecision as e:
                 errors.append({"row": n, "id": case_id, "error": str(e)})
                 continue
-            note = cell(row, "nota")
-            cur.execute("UPDATE kb.review_item SET status = %s, corrected_value = %s, decided_by = %s, "
-                        "decided_at = now(), note = %s, updated_at = now() WHERE id = %s",
-                        (status, json.dumps(value) if value is not None else None, reviewer.strip(),
-                         str(note) if note not in (None, "") else None, case_id))
             stats[status] += 1
         summary = {"file": str(path), "decided": dict(stats), "errors": errors}
         if rebuild and (stats["approved"] or stats["rejected"] or stats["corrected"]):

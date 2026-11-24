@@ -40,6 +40,12 @@ PYTHONPATH=src python -m vehicle_scraper kb clean                       # makes,
 PYTHONPATH=src python -m vehicle_scraper kb build                       # generations, powertrains, variants (after clean)
 PYTHONPATH=src python -m vehicle_scraper kb review export --out data/review.xlsx [--issue weak_model] [--limit N]
 PYTHONPATH=src python -m vehicle_scraper kb review import data/review.xlsx --reviewer "Nombre"   # then clean + build
+PYTHONPATH=src python -m vehicle_scraper kb worker [--once] [--poll 30]   # applies the portal's kb.web_action queue
+
+# portal (src/portal, Next.js 16; needs src/portal/.env.local, see its .env.example and README)
+cd src/portal && pnpm install && pnpm dev                 # http://127.0.0.1:3000
+cd src/portal && pnpm lint && pnpm typecheck && pnpm test # ESLint, tsc, Vitest (no database)
+cd src/portal && pnpm db:types                            # regenerate src/generated/db.d.ts after a migration
 PYTHONPATH=src python -m vehicle_scraper kb status
 # re-extract only some listings after a parser fix (one id per line; ask before running)
 PYTHONPATH=src python -m vehicle_scraper run --site driveway --ids-file data/reextract/ids.txt
@@ -218,6 +224,40 @@ So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
   (`--no-rebuild` skips). Effects live where the rule lives: make/model decisions and
   per-listing overrides in `clean._apply_decisions`/`_listing_overrides` (provenance
   `manual`), splits, manual spec values and evolution notes in `build._apply_decisions`.
+- Portal backend (migration `0007_portal`, `kb/worker.py`; the Next.js site goes in
+  `src/portal`, never `src/web`, which holds old-branch leftovers): `kb.app_user` maps an
+  email (from GCP IAP) to `lector` < `revisor` < `editor`; `kb.web_action` is the only table
+  the portal writes (`docs/sql/portal_role.sql`: SELECT on kb/staging, INSERT of kind, payload,
+  requested_by only). `kb worker` LISTENs on `kb_web_action`, re-checks the requester's role
+  (`decide_case` needs revisor, everything else editor), validates with the review code
+  (`review.record_decision`, `parse_value`) and applies each action in a savepoint: `applied`
+  with a result or `failed` with the error. Edits of published columns become manual
+  evidence (and update the column at once); identity columns (generation name/years/status,
+  powertrain displacement/fuel/transmission/drivetrain) are edited in place. Listings only
+  move on `recalculate` (clean + build), an editor's button, never automatic. Migration
+  `0008_first_editor` inserts `KB_FIRST_EDITOR_EMAIL` (from `.env`, never written in the
+  repo) as editor; tests pin that variable empty so a developer's address never leaks in.
+- Portal site (`src/portal`): read `src/portal/AGENTS.md` and `node_modules/next/dist/docs/`
+  before changing Next code (Next 16: `proxy.ts` replaced middleware; Cache Components:
+  request data and DB reads (`io()` in `lib/queries`) must sit inside `<Suspense>`). Identity:
+  `lib/auth/current-user.ts:getCurrentUser` verifies IAP's signed `x-goog-iap-jwt-assertion`
+  (`lib/auth/iap.ts`: ES256, issuer `https://cloud.google.com/iap`, `PORTAL_IAP_AUDIENCE`,
+  30 s skew, max age 11 min) or, with `PORTAL_AUTH=dev`, uses `PORTAL_DEV_USER` (refused when
+  NODE_ENV=production or K_SERVICE is set). `proxy.ts` only rejects requests without the
+  header (401; `/api/salud` exempt). The unsigned email header is never trusted. Roles
+  (`lib/auth/roles.ts`) mirror `kb/worker.py`; pages check them with `userWithRole`, the
+  worker enforces them. Tests sign their own ES256 tokens (`PORTAL_IAP_JWKS`, refused on
+  Cloud Run). Pages: `/` (estado + Recalcular for editors), `/revision` + `/revision/[id]`
+  (queue from the `kb.review_case` view, migration 0009, which the Excel export also reads),
+  `/base` → `/base/marca/[id]` → `/base/generacion/[id]` (+ cut/merge) →
+  `/base/tren-motriz/[id]` / `/base/variante/[id]` (+ evolution notes), `/catalogos`,
+  `/usuarios` (editors only), `/acciones` (history). Every write is a server action in
+  `lib/actions/request.ts` (Zod in `schemas.ts`, role checked) that only INSERTs into
+  `kb.web_action`; editors get inline `FieldEditor`s on the sheets (published values become
+  manual evidence) and each entity page lists its `RecentActions`, refreshing while queued. The portal repeats a few Python tables (`lib/issues.ts` = review.ISSUES,
+  `lib/auth/roles.ts` = worker roles, `lib/fields.ts` labels and SOURCE_RANK):
+  `tests/test_portal_sync.py` fails when they drift. After a migration: re-run
+  `docs/sql/portal_role.sql` and `pnpm db:types`.
 
 ## Current site status (see README.md for the up-to-date table)
 
