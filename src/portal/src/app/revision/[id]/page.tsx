@@ -18,20 +18,29 @@ import { fieldLabel, formatValue, type Catalogs } from "@/lib/fields";
 import { formatDate, formatInt } from "@/lib/format";
 import { ENTITY_LABELS, ISSUES, isIssue, type Issue } from "@/lib/issues";
 import { getCatalogs } from "@/lib/queries/knowledge";
-import { caseListing, getCase } from "@/lib/queries/review";
+import { caseListing, getCase, parseQueueFilters, queueHref } from "@/lib/queries/review";
 
 export const metadata: Metadata = { title: "Caso" };
 
 export default function CasePage(props: PageProps<"/revision/[id]">) {
   return (
     <main className="space-y-6">
-      <Link href="/revision" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-        <ArrowLeft className="size-4" aria-hidden /> Volver a la cola
-      </Link>
+      <Suspense fallback={<Skeleton className="h-5 w-36" />}>
+        <BackLink searchParams={props.searchParams} />
+      </Suspense>
       <Suspense fallback={<Skeleton className="h-96" />}>
         <CaseView {...props} />
       </Suspense>
     </main>
+  );
+}
+
+async function BackLink({ searchParams }: Pick<PageProps<"/revision/[id]">, "searchParams">) {
+  const href = queueHref(parseQueueFilters(await searchParams));
+  return (
+    <Link href={href} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+      <ArrowLeft className="size-4" aria-hidden /> Volver a la cola
+    </Link>
   );
 }
 

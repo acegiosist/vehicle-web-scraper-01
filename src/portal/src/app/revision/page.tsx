@@ -16,6 +16,7 @@ import { ENTITY_LABELS, ISSUE_ORDER, ISSUES, type Issue } from "@/lib/issues";
 import { getCatalogs } from "@/lib/queries/knowledge";
 import {
   parseQueueFilters,
+  caseHref,
   pendingByIssue,
   QUEUE_PAGE_SIZE,
   queueHref,
@@ -85,7 +86,7 @@ async function Queue({ searchParams }: PageProps<"/revision">) {
             <TableRow key={String(r.id)}>
               <TableCell className="whitespace-nowrap">{ISSUES[r.issue as Issue]?.label ?? r.issue}</TableCell>
               <TableCell className="max-w-md">
-                <Link href={`/revision/${r.id}`} className="underline-offset-2 hover:underline">
+                <Link href={caseHref(r.id, filters)} className="underline-offset-2 hover:underline">
                   {r.entity_label ?? `${ENTITY_LABELS[r.entity_type ?? ""] ?? r.entity_type}`}
                 </Link>
                 {r.country_code && <span className="ml-1 text-xs text-muted-foreground">{r.country_code}</span>}

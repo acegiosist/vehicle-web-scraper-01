@@ -22,6 +22,12 @@ export function parseQueueFilters(sp: Record<string, string | string[] | undefin
   return { issue: isIssue(issue) ? issue : undefined, q: q || undefined, page: page > 0 ? page : 1 };
 }
 
+/** Link to a case that remembers the queue's filters, so "Volver a la cola" restores them. */
+export function caseHref(id: unknown, f: QueueFilters): string {
+  const q = queueHref(f);
+  return `/revision/${String(id)}${q.slice("/revision".length)}`;
+}
+
 export function queueHref(f: QueueFilters, page = f.page): string {
   const p = new URLSearchParams();
   if (f.issue) p.set("tipo", f.issue);
