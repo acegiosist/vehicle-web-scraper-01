@@ -28,17 +28,21 @@ GENERATION_FROM_LISTINGS = ["doors", "seats", "cargo_capacity_l", "fuel_tank_cap
 POWERTRAIN_FROM_LISTINGS = ["horsepower_hp", "engine_cylinders", "fuel_economy_kml", "ev_range_km",
                             "ev_charging_speed_kw"]
 VARIANT_EXTRA_FROM_LISTINGS = ["wheel_size_in", "tire_size", "country_of_manufacture"]
-VARIANT_FROM_LISTINGS = list(FEATURE_FIELDS) + VARIANT_EXTRA_FROM_LISTINGS
+# Schema field -> level column when they differ (catalog-backed columns end in _code). Evidence
+# is stored under the column name, so an evidence field is always a column.
+COLUMN_OF = {"headlight_type": "headlight_type_code", "brake_front": "brake_front_code",
+             "brake_rear": "brake_rear_code"}
+LISTING_FIELD_OF = {column: f for f, column in COLUMN_OF.items()}      # column -> schema field
+VARIANT_FROM_LISTINGS = [COLUMN_OF.get(f, f) for f in FEATURE_FIELDS] + VARIANT_EXTRA_FROM_LISTINGS
 
 # Published columns per level (same names as the schema fields where one exists).
 GENERATION_COLUMNS = ["segment_code", "length_mm", "width_mm", "height_mm", "wheelbase_mm",
                       *GENERATION_FROM_LISTINGS]
 POWERTRAIN_COLUMNS = ["engine_code", "engine_name", "gears", "torque_nm", *POWERTRAIN_FROM_LISTINGS]
-VARIANT_COLUMNS = [*VARIANT_FROM_LISTINGS, "headlight_type_code", "brake_front_code", "brake_rear_code",
-                   "wireless_charger", "seats"]
+VARIANT_COLUMNS = [*VARIANT_FROM_LISTINGS, "seats"]
 
-EQUIPMENT_FIELDS = set(FEATURE_FIELDS) | {"wheel_size_in", "tire_size", "country_of_manufacture"}
-BOOLEAN = set(BOOLEAN_FIELDS) | {"wireless_charger"}
+EQUIPMENT_FIELDS = set(VARIANT_FROM_LISTINGS)
+BOOLEAN = set(BOOLEAN_FIELDS)
 
 # Plausible ranges for numbers voted from listings (outside: ignored as a vote).
 RANGES = {"doors": (2, 5), "seats": (1, 9), "cargo_capacity_l": (10, 5000), "fuel_tank_capacity_l": (3, 400),

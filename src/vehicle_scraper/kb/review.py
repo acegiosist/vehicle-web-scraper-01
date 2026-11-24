@@ -33,7 +33,8 @@ DECISIONS = {"aprobar": "approved", "approve": "approved", "rechazar": "rejected
 CLASSES = {"auto": "car", "moto": "motorcycle", "pesado": "heavy", "maquinaria": "machinery", "golf": "golf_cart",
            "bicicleta": "bicycle", "remolque": "trailer", "cuatrimoto": "atv"}
 CATALOG_FIELDS = {"body_style": "body_style", "fuel_type": "fuel_type", "transmission_type": "transmission_type",
-                  "drivetrain": "drivetrain"}
+                  "drivetrain": "drivetrain", "headlight_type_code": "headlight_type",
+                  "brake_front_code": "brake_type", "brake_rear_code": "brake_type"}
 TEXT_FIELDS = {"tire_size", "country_of_manufacture"}
 # Order of the rows: identity first (it unblocks the most), then levels, then listings.
 ISSUE_ORDER = ["unknown_make", "missing_make", "weak_model", "model_is_attributes", "generation_split",

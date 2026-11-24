@@ -380,3 +380,13 @@ def test_review_make_class_and_value_validation(conn, tmp_path):
     fill(out, {fuel: ("corregir", "híbrido", None)})                 # Spanish catalog name works
     import_review(conn, out, reviewer="Ana")
     assert q(conn, "SELECT fuel_type_code FROM kb.clean_listing WHERE listing_id = 'e1'") == [("Hybrid",)]
+
+
+def test_build_publishes_headlights_brakes_and_charger(conn, tmp_path):
+    recs = [creta(f"a{i}", 2024, 1.5, drivetrain="FWD", headlight_type="LED", brake_front="Disc",
+                  brake_rear="Drum", wireless_charger=True) for i in range(5)]
+    built(conn, tmp_path, recs)
+    assert q(conn, "SELECT headlight_type_code, brake_front_code, brake_rear_code, wireless_charger "
+                   "FROM kb.commercial_variant WHERE listings > 0") == [("LED", "Disc", "Drum", True)]
+    assert q(conn, "SELECT specs->>'headlight_type', specs->>'wireless_charger' FROM kb.clean_listing "
+                   "WHERE listing_id = 'a0'") == [("LED", "true")]

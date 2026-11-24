@@ -12,6 +12,8 @@ FuelType = Literal["Gasoline", "Diesel", "Hybrid", "EV", "CNG", "Flex"]   # CNG:
                                                                            # Flex: gasoline/ethanol (E85)
 TransmissionType = Literal["Manual", "Automatic", "CVT", "DCT"]
 Drivetrain = Literal["FWD", "RWD", "AWD", "4WD", "2WD"]   # 2WD: "4x2", front/rear not stated
+HeadlightType = Literal["Halogen", "Xenon", "LED", "MatrixLED"]
+BrakeType = Literal["Disc", "Drum"]
 
 # Ordered list of the schema fields (used by CSV export and the coverage report).
 IDENTITY_FIELDS = [
@@ -24,17 +26,17 @@ TECH_FIELDS = [
 ]
 FEATURE_FIELDS = [
     # Safety
-    "abs", "airbags_count", "stability_control", "traction_control",
+    "abs", "airbags_count", "stability_control", "traction_control", "brake_front", "brake_rear",
     # ADAS
     "adaptive_cruise_control", "lane_assist", "automatic_emergency_braking", "blind_spot_monitoring",
     # Exterior
-    "led_lights", "fog_lights", "sunroof", "panoramic_roof", "roof_rails", "alloy_wheels",
+    "led_lights", "headlight_type", "fog_lights", "sunroof", "panoramic_roof", "roof_rails", "alloy_wheels",
     # Interior
     "leather_seats", "power_seats", "heated_seats", "cooled_seats", "memory_seats",
     # Comfort
     "climate_control", "dual_zone_ac", "keyless_entry", "push_button_start",
     # Infotainment
-    "screen_size_in", "bluetooth", "apple_carplay", "android_auto", "navigation",
+    "screen_size_in", "bluetooth", "apple_carplay", "android_auto", "navigation", "wireless_charger",
     # Cameras
     "reverse_camera", "camera_360", "front_camera",
     # Parking
@@ -49,7 +51,9 @@ LISTING_FIELDS = ["price", "currency", "mileage_km"]
 META_FIELDS = ["source_site", "source_url", "listing_id", "listed_at", "scraped_at", "parse_warnings"]
 ALL_FIELDS = META_FIELDS[:3] + LISTING_FIELDS + SCHEMA_FIELDS + META_FIELDS[3:]
 
-BOOLEAN_FIELDS = [f for f in FEATURE_FIELDS if f not in ("airbags_count", "screen_size_in")]
+# Equipment fields that hold a number or a catalog value instead of yes/no.
+VALUED_FEATURES = ("airbags_count", "screen_size_in", "headlight_type", "brake_front", "brake_rear")
+BOOLEAN_FIELDS = [f for f in FEATURE_FIELDS if f not in VALUED_FEATURES]
 
 
 class VehicleRecord(BaseModel):
@@ -97,11 +101,14 @@ class VehicleRecord(BaseModel):
     airbags_count: Optional[int] = None
     stability_control: Optional[bool] = None
     traction_control: Optional[bool] = None
+    brake_front: Optional[BrakeType] = None
+    brake_rear: Optional[BrakeType] = None
     adaptive_cruise_control: Optional[bool] = None
     lane_assist: Optional[bool] = None
     automatic_emergency_braking: Optional[bool] = None
     blind_spot_monitoring: Optional[bool] = None
     led_lights: Optional[bool] = None
+    headlight_type: Optional[HeadlightType] = None
     fog_lights: Optional[bool] = None
     sunroof: Optional[bool] = None
     panoramic_roof: Optional[bool] = None
@@ -121,6 +128,7 @@ class VehicleRecord(BaseModel):
     apple_carplay: Optional[bool] = None
     android_auto: Optional[bool] = None
     navigation: Optional[bool] = None
+    wireless_charger: Optional[bool] = None
     reverse_camera: Optional[bool] = None
     camera_360: Optional[bool] = None
     front_camera: Optional[bool] = None

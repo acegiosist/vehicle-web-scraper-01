@@ -21,6 +21,10 @@ from .models import BOOLEAN_FIELDS, VehicleRecord
 # 1) Label rules: (field, include regex, exclude regex or None). First match wins,
 #    so more specific rules go first.
 # ---------------------------------------------------------------------------
+_NOT_BRAKE_TYPE = (r"abs|asist|assist|emergenc|mano|estacionamiento|parking|control|electronic|regenera|distribu"
+                   r"|diamet|rotor|caliper|pinza|size|tamano|width|ancho|thickness|espesor|swept|area")
+_NOT_HEADLIGHT = (r"niebla|antiniebla|fog|exploradora|trasera|rear|tail|auto|altura|nivel|level|lavafaros|washer"
+                  r"|diurn|daytime|drl|direccional|adaptativ|on/off")
 LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("listing_skip", r"valvulas|velocidad maxima|aceleracion|torque|par motor|relacion|compresion|peso|largo|ancho|alto|diametro|suspension|amortigu|codigo|placa|color|ubicacion|blindaje|armored|garantia|warranty|direccion$|steering|cinturon", None),
     ("make", r"^(marca|brand|make|fabricante)$", None),
@@ -36,6 +40,10 @@ LABEL_RULES: list[tuple[str, str, Optional[str]]] = [
     ("fuel_tank_capacity_l", r"tanque|tank|deposito de combustible|capacidad de combustible", None),
     ("transmission_type", r"transmision|^caja|tipo de caja|gearbox|^box$|cambios$|transmission", r"cantidad de cambios|numero de cambios|velocidades"),
     ("drivetrain", r"traccion|drivetrain|wheel drive|^drive( type)?$|tipo de traccion|sistema de traccion", r"control de traccion"),
+    ("brake_front", r"frenos? delanter|freno delantero|front brakes?|brakes?,? front", _NOT_BRAKE_TYPE),
+    ("brake_rear", r"frenos? traser|freno trasero|frenos? posterior|rear brakes?|brakes?,? rear", _NOT_BRAKE_TYPE),
+    ("headlight_type", r"tipo de (faros|farolas|luces|iluminacion)|faros delanteros|farolas delanteras|luces delanteras"
+                       r"|^faros$|^farolas$|^luces$|headlamps?( type)?$|headlights?( type)?$", _NOT_HEADLIGHT),
     ("seats", r"asientos|plazas|pasajeros|seats|seating|capacidad de personas|passenger",
      r"cuero|electric|calefact|ventil|memoria|abatib|plegab|fold|split|divid|fila|\brow|ajust|lumbar"
      r"|power|heat|cool|memory|leather|material|driver|conductor"
@@ -92,6 +100,8 @@ FEATURE_PATTERNS: dict[str, list[str]] = {
     "apple_carplay": [r"carplay", r"car play"],
     "android_auto": [r"android ?auto"],
     "navigation": [r"navegador", r"navegacion", r"\bgps\b", r"navigation"],
+    "wireless_charger": [r"(cargador|carga|cargadores) (de celular(es)? |de telefono(s)? |para celular(es)? )?inalambric",
+                         r"wireless (phone |device |smartphone )?charg", r"inductive charg", r"carga por induccion"],
     "camera_360": [r"360", r"aerial view", r"surround[- ]view", r"bird'?s[- ]eye view"],
     "front_camera": [r"camara (frontal|delantera)", r"front camera"],
     "reverse_camera": [r"camara (de )?(reversa|retroceso|trasera|posterior|parqueo|estacionamiento)", r"rear(view)? camera", r"back[- ]?up camera", r"reverse camera", r"camara de retro"],
@@ -115,6 +125,25 @@ def match_label(label: str) -> Optional[str]:
         if inc.search(lab) and not (exc and exc.search(lab)):
             return None if field == "listing_skip" else field
     return None
+
+
+_LIGHT_WORD = re.compile(r"\b(faros?|farolas?|luces|luz|headl(ight|amp)s?|projector|proyector(es)?|iluminacion)\b")
+_NOT_HEADLIGHT_TEXT = re.compile(_NOT_HEADLIGHT)
+
+
+def match_equipment(text: str) -> dict:
+    """Valued equipment an item states: headlight type and brakes per axle ("LED Headlights",
+    "Faros de xenón", "4-Wheel Disc Brakes", "Front Disc/Rear Drum Brakes"). Negated items and
+    other lights (fog, tail, DRL) give nothing."""
+    t = N.norm(text)
+    if re.search(r"\b(sin|no tiene|no incluye|no cuenta con|without)\b", t):
+        return {}
+    out = dict(N.brakes_from_text(t))
+    if _LIGHT_WORD.search(t) and not _NOT_HEADLIGHT_TEXT.search(t):
+        kind = N.to_headlight(t)
+        if kind:
+            out["headlight_type"] = kind
+    return out
 
 
 def match_features(text: str) -> set[str]:
@@ -188,6 +217,9 @@ CONVERTERS: dict[str, Conv] = {
     "ev_charging_speed_kw": lambda v, h: N.to_kw(v),
     "airbags_count": lambda v, h: (lambda n: n if n and 1 <= n <= 14 else None)(N.parse_int(v)),
     "screen_size_in": lambda v, h: (lambda n: n if n and 3 <= n <= 20 else None)(N.parse_number(v)),
+    "headlight_type": lambda v, h: N.to_headlight(v),
+    "brake_front": lambda v, h: N.to_brake(v),
+    "brake_rear": lambda v, h: N.to_brake(v),
     "mileage_km": N.to_km,
     "price": lambda v, h: N.parse_number(v),
     "currency": lambda v, h: N.clean(v),
@@ -201,6 +233,7 @@ MOTO_CONVERTERS: dict[str, Conv] = {
     "horsepower_hp": lambda v, h: N.to_hp(v, h, moto=True),
 }
 
+_VALUED_LABELS = {"headlight_type", "brake_front", "brake_rear"}
 _NUMERIC_FIELDS = {
     "engine_displacement_l", "engine_cylinders", "horsepower_hp", "fuel_tank_capacity_l", "seats", "doors",
     "cargo_capacity_l", "wheel_size_in", "tire_size", "fuel_economy_kml", "ev_range_km", "ev_charging_speed_kw",
@@ -259,6 +292,8 @@ class RecordBuilder:
         hint = f"{label} {value}"
         if field == "model" and N.to_year(value) and re.fullmatch(r"\s*\d{4}\s*", str(value)):
             field = "model_year"            # In Colombia "Modelo: 2010" means the year
+        if field in _VALUED_LABELS and N.to_bool(value) is not None:
+            field = None                      # "Faros delanteros": "Sí" says nothing about the type
         if field in _NUMERIC_FIELDS and N.to_bool(value) is not None:
             field = None                      # "Con airbags": "Sí" is a feature flag, not a count
         if field == "engine_displacement_l" and _CYLINDERS_ONLY_RE.fullmatch(N.norm(value)):
@@ -278,6 +313,9 @@ class RecordBuilder:
             return field
         # Boolean feature expressed as a pair: "Control de frenos ABS": "S"
         b = N.to_bool(value)
+        if b is True:                         # "Frenos de disco en las 4 ruedas": "S"
+            for f, v in match_equipment(label).items():
+                self.set(f, v)
         feats = match_features(label)
         if feats and b is not None:
             for f in feats:
@@ -303,6 +341,8 @@ class RecordBuilder:
         for item in items:
             for f in match_features(item):
                 self.set(f, True)
+            for f, v in match_equipment(item).items():
+                self.set(f, v)
             m = re.search(r"(\d{1,2})\s*(air ?bags?|bolsas de aire)", N.norm(item))
             if m:
                 self.set("airbags_count", m.group(1))

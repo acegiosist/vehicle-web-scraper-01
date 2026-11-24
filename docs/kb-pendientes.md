@@ -4,12 +4,12 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 
 ## Fase 3 (tres niveles): pendiente
 
-- [ ] **Capturar en el scraper los campos nuevos del Nivel 3**: tipo de faros (halógeno, xenón,
-      LED, LED matricial), frenos delanteros y traseros (disco, tambor) y cargador inalámbrico.
-      Las columnas ya existen en `kb.commercial_variant`, pero quedan vacías hasta que estén en
-      `models.py`, en los sinónimos de `mapping.py` (con sus pruebas) y en
-      `kb/levels.py:VARIANT_FROM_LISTINGS`. Después, volver a extraer solo los anuncios afectados
-      (`run --ids-file`, con visto bueno antes de cada corrida).
+- [x] **Capturar en el scraper los campos nuevos del Nivel 3** (2026-11-24): tipo de faros,
+      frenos delanteros y traseros y cargador inalámbrico ya están en el esquema, en los
+      sinónimos (español e inglés) y votan en la variante comercial.
+- [ ] **Volver a extraer para llenar esos campos**: lo ya extraído no los tiene. Hay que
+      decidir qué sitios y cuándo, con visto bueno antes de cada corrida. Driveway necesita la
+      VPN.
 - [ ] **Fuentes para lo que los anuncios no traen**: ciclos reales de cada generación (año
       inicio/fin), dimensiones, segmento, torque, número de velocidades y código de motor.
       Acordado: Claude con revisión humana, fuentes externas y captura manual, con prioridad

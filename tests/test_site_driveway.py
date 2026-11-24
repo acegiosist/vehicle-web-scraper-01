@@ -46,7 +46,10 @@ EXPECTED = {   # search result + driveway_detail.json (overview and every equipm
     'stability_control': True,
     'traction_control': True,
     'blind_spot_monitoring': True,
+    'brake_front': 'Disc',                  # "4-Wheel Disc Brakes"
+    'brake_rear': 'Disc',
     'led_lights': True,
+    'headlight_type': 'LED',                # "LED Headlights"
     'fog_lights': True,
     'leather_seats': True,
     'power_seats': True,

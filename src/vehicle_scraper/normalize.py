@@ -399,6 +399,62 @@ def body_fallback(value: object) -> Optional[str]:
     return _first_match(value, _BODY_FALLBACK)
 
 
+# Matrix/pixel first ("LED matricial" is not plain LED), then xenon, LED, halogen.
+_HEADLIGHT = [
+    (r"matri[cx]|pixel|multibeam|digital light|adaptive (driving beam|led)|\badb\b", "MatrixLED"),
+    (r"xenon|\bhid\b|bi-?xenon|descarga de gas", "Xenon"),
+    (r"\bfull[- ]?led\b|\bleds?\b", "LED"),
+    (r"halogen", "Halogen"),
+]
+
+
+def to_headlight(value: object) -> Optional[str]:
+    """Headlight technology: Halogen | Xenon | LED | MatrixLED, or None."""
+    return _first_match(value, _HEADLIGHT)
+
+
+def to_brake(value: object) -> Optional[str]:
+    """Brake type of one axle: Disc | Drum. Both words ("disco/tambor") is not one axle's
+    answer, so it gives None."""
+    v = norm(value)
+    disc, drum = bool(re.search(r"disco|discos|\bdiscs?\b", v)), bool(re.search(r"tambor|\bdrums?\b", v))
+    if disc == drum:
+        return None
+    return "Disc" if disc else "Drum"
+
+
+_FRONT = r"(delanter[oa]s?|front)"
+_REAR = r"(traser[oa]s?|posterior(es)?|rear)"
+_ALL_WHEELS = r"(\b4[- ]?(wheel|ruedas)|cuatro ruedas|four[- ]wheel|all[- ]wheel|\b4 discos)"
+_DISC = r"(disco|discos|discs?)"
+_DRUM = r"(tambor|tambores|drums?)"
+_NOT_BRAKE_TYPE = re.compile(r"\babs\b|asist|assist|emergenc|mano|estacionamiento|parking|control|electronic"
+                             r"|regenera|distribu|ebd|\bbas\b|pastilla|pad|liquido|fluid"
+                             r"|diamet|rotor|caliper|pinza|size|tamano|width|thickness|espesor|swept")
+
+
+def brakes_from_text(value: object) -> dict:
+    """{"brake_front": .., "brake_rear": ..} from an equipment text such as "4-Wheel Disc Brakes",
+    "Front Disc/Rear Drum Brakes" or "Frenos de disco delanteros"; only what it states."""
+    v = norm(value)
+    if not re.search(r"fren|brake", v) or _NOT_BRAKE_TYPE.search(v):
+        return {}
+    if re.search(_ALL_WHEELS, v) and re.search(_DISC, v):
+        return {"brake_front": "Disc", "brake_rear": "Disc"}
+    out = {}
+    # First "<axle> <type>" ("Front Disc/Rear Drum", "delanteros de disco"), then "<type> <axle>"
+    # ("discos delanteros y tambores traseros") for an axle still unknown; at most one word between.
+    for pattern in ("{side}\\W+(\\w+\\W+)?{word}", "{word}\\W+(\\w+\\W+)?{side}"):
+        for axle, side in (("brake_front", _FRONT), ("brake_rear", _REAR)):
+            if axle in out:
+                continue
+            kinds = [k for k, w in (("Disc", _DISC), ("Drum", _DRUM))
+                     if re.search(pattern.format(side=side, word=w), v)]
+            if len(kinds) == 1:
+                out[axle] = kinds[0]
+    return out
+
+
 _COUNTRIES = {
     "japon": "Japan", "japan": "Japan", "corea": "South Korea", "korea": "South Korea",
     "mexico": "Mexico", "brasil": "Brazil", "brazil": "Brazil", "estados unidos": "United States",

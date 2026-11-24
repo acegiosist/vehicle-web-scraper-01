@@ -30,6 +30,10 @@ EXPECTED = {
     'wheel_size_in': 18,
     'tire_size': '235/40R18',
     'fuel_economy_kml': 26.0,
+    'brake_front': 'Disc',                  # "4-Wheel Disc Brakes"
+    'brake_rear': 'Disc',
+    'headlight_type': 'LED',                # "Headlamp Type": "LED"
+    'wireless_charger': True,               # "Wireless Charging"
     'stability_control': True,
     'traction_control': True,
     'adaptive_cruise_control': True,

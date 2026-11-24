@@ -1,7 +1,7 @@
 # Vehicle Scraper
 
 Scrapes car listings from several sites and normalizes them into **one schema**
-(59 attributes: identity, technical specs, equipment & features), plus price,
+(63 attributes: identity, technical specs, equipment & features), plus price,
 currency and mileage. Each site has its own scraper. They all share the
 label-mapping and unit-conversion layer, so the output columns are the same
 for every site.

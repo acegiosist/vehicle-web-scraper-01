@@ -42,6 +42,8 @@ def catalog_codes(table: str) -> list[str]:
     ("transmission_type", models.TransmissionType),
     ("drivetrain", models.Drivetrain),
     ("body_style", models.VehicleType),
+    ("headlight_type", models.HeadlightType),
+    ("brake_type", models.BrakeType),
 ])
 def test_catalog_codes_match_scraper_schema(table, literal):
     # The scraper's values must map 1:1 to catalog codes. If models.py gains a value,

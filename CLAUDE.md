@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Scrapes car listings from several sites and normalizes them into **one schema** (59 attributes:
+Scrapes car listings from several sites and normalizes them into **one schema** (63 attributes:
 identity, technical specs, equipment & features, plus price/currency/mileage), defined in
 `src/vehicle_scraper/models.py` as a Pydantic `VehicleRecord`. Every site scraper feeds the same
 label-mapping and unit-conversion layer so output columns line up across sites.
@@ -112,6 +112,12 @@ pages, only used when `USE_BROWSER=true` or `--browser`.
 - Missing/unknown → `null`. A boolean feature becomes `false` only when a site explicitly says so;
   a feature that's simply not listed stays `null` (free text can only ever set a feature to `true`).
 - Units are auto-converted: cc→L, gallons→L, mpg/L per 100km→km/L, cu ft→L, miles→km, kW/CV→hp.
+- Valued equipment (`models.VALUED_FEATURES`): `headlight_type` (Halogen/Xenon/LED/MatrixLED,
+  `N.to_headlight`) and `brake_front`/`brake_rear` (Disc/Drum, `N.to_brake`) come from labels
+  ("Frenos delanteros: Disco", "Headlamp Type: LED") or equipment items via
+  `mapping.match_equipment` ("4-Wheel Disc Brakes", "Front Disc/Rear Drum Brakes", "Faros de
+  xenón"); fog/tail/DRL lights and brake assists, rotors or sizes never set them, and a yes/no
+  value under such a label says nothing about the type. `wireless_charger` is a plain boolean.
 - `4x2`/`2WD` is ambiguous (front- or rear-wheel), so `drivetrain` is `2WD` (its own enum value)
   instead of guessing FWD/RWD. Unparseable displacement on an EV stays `null` without a warning.
 - `vehicle_type = "Motorcycle"` is only ever set explicitly by a scraper (carroya's category "Motos"),

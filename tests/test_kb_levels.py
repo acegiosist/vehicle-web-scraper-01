@@ -22,9 +22,11 @@ def _frozen_list(name: str) -> list[str]:
 
 def test_migration_feature_columns_match_models():
     # models.py gaining an equipment field fails here until a migration adds its column.
-    assert sorted(_frozen_list("FEATURE_BOOLS")) == sorted(BOOLEAN_FIELDS)
-    for column in ("airbags_count", "screen_size_in"):
-        assert f"{column} " in MIGRATION
+    bools = set(_frozen_list("FEATURE_BOOLS"))
+    for f in FEATURE_FIELDS:
+        column = levels.COLUMN_OF.get(f, f)
+        assert column in bools or f"    {column} " in MIGRATION, f
+    assert set(BOOLEAN_FIELDS) - bools == {"wireless_charger"}          # its own column in 0006
 
 
 def test_every_level_column_exists_in_the_migration():
@@ -34,7 +36,10 @@ def test_every_level_column_exists_in_the_migration():
 
 
 def test_field_placement():
-    assert set(FEATURE_FIELDS) <= set(levels.VARIANT_FROM_LISTINGS)
+    assert {levels.COLUMN_OF.get(f, f) for f in FEATURE_FIELDS} <= set(levels.VARIANT_FROM_LISTINGS)
+    assert {"headlight_type_code", "brake_front_code", "brake_rear_code", "wireless_charger"} \
+        <= set(levels.VARIANT_COLUMNS)
+    assert len(levels.VARIANT_COLUMNS) == len(set(levels.VARIANT_COLUMNS))
     assert {"doors", "seats", "cargo_capacity_l", "fuel_tank_capacity_l"} == set(levels.GENERATION_FROM_LISTINGS)
     assert "country_of_manufacture" in levels.VARIANT_COLUMNS and "seats" in levels.VARIANT_COLUMNS
     assert levels.SOURCE_RANK["manual"] < levels.SOURCE_RANK["external"] < levels.SOURCE_RANK["listings"] \

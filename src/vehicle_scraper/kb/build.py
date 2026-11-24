@@ -33,7 +33,8 @@ from .db import take_writer_lock
 from .identity import compact_key
 from .levels import (BOOLEAN, EQUIP_MIN_AGREEMENT, EQUIP_MIN_SUPPORT, EQUIPMENT_FIELDS, EVOLUTION_MIN_SUPPORT,
                      GENERATION_COLUMNS, GENERATION_FROM_LISTINGS, MECH_DISAGREEMENT, POWERTRAIN_COLUMNS,
-                     POWERTRAIN_FROM_LISTINGS, RANGES, SOURCE_RANK, VARIANT_COLUMNS, VARIANT_FROM_LISTINGS)
+                     LISTING_FIELD_OF, POWERTRAIN_FROM_LISTINGS, RANGES, SOURCE_RANK, VARIANT_COLUMNS,
+                     VARIANT_FROM_LISTINGS)
 
 BUILD_ISSUES = ("generation_split", "spec_disagreement", "evolution_note")
 DISPLACEMENT_TOLERANCE = 0.1
@@ -234,6 +235,9 @@ WHERE l.excluded_reason IS NULL ORDER BY l.source_site, l.listing_id"""):
             disp_r = round(float(disp), 1) if disp is not None else None
             votes = dict(specs or {})
             votes.update({"horsepower_hp": hp, "engine_cylinders": cyl, "doors": doors, "seats": seats})
+            for column, schema_field in LISTING_FIELD_OF.items():      # vote under the column's name
+                if schema_field in votes:
+                    votes[column] = votes.pop(schema_field)
             listings.append(_Listing(site, lid, country, year, model_id, mstatus == "accepted", body,
                                      (fuel, trans, drive, disp_r, cyl if disp_r is None else None), trim, votes))
 
