@@ -46,7 +46,8 @@ coverage report are written.
 **Listing age (`run --max-age`)** filters on `Listing.listed_at` (when the listing was posted,
 UTC), not on `model_year`. `discover()` sets it when known up front — CarroYa's `clfechapub`, or
 the sitemap `<lastmod>` via `SiteScraper.sitemap_entries` — so old listings are skipped without
-fetching; `parse()` may overwrite it (TrueCar's page `listedAt`). Listings with no date at all
+fetching; `parse()` may overwrite it (TrueCar's page `listedAt`). `run_site` stores it in the
+record's `listed_at` column (a metadata field, like `scraped_at`). Listings with no date at all
 aren't saved under `--max-age`, and `--limit` then counts only listings that pass.
 `run_site` also sets `scraper.listed_since` to the cutoff before `discover()`, so a site whose
 discovery is sorted newest-first (Driveway, by `inventoryDate`) stops paging once it reaches it.

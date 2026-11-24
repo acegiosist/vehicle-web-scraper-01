@@ -86,6 +86,8 @@ def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
                         stats["too_old"] += 1
                         continue
                 passed += 1
+                if listing.listed_at is not None:
+                    rec.listed_at = listing.listed_at     # from discovery, or refined by parse()
                 store.save(rec)
                 stats["saved"] += 1
                 if settings.save_raw:
