@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { userWithRole } from "@/lib/auth/current-user";
+import { baseQuery, parseBaseFilters } from "@/lib/base-href";
 import { formatValue } from "@/lib/fields";
 import { formatInt, formatYears as years } from "@/lib/format";
 import { getCatalogs, makeWithGenerations } from "@/lib/queries/knowledge";
@@ -18,13 +19,23 @@ export const metadata: Metadata = { title: "Marca" };
 export default function MakePage(props: PageProps<"/base/marca/[id]">) {
   return (
     <main className="space-y-6">
-      <Link href="/base" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-        <ArrowLeft className="size-4" aria-hidden /> Todas las marcas
-      </Link>
+      <Suspense fallback={<Skeleton className="h-5 w-36" />}>
+        <BackLink searchParams={props.searchParams} />
+      </Suspense>
       <Suspense fallback={<Skeleton className="h-96" />}>
         <MakeView {...props} />
       </Suspense>
     </main>
+  );
+}
+
+/** Back to the make list with the search, page and size the user came from. */
+async function BackLink({ searchParams }: Pick<PageProps<"/base/marca/[id]">, "searchParams">) {
+  const href = `/base${baseQuery(parseBaseFilters(await searchParams))}`;
+  return (
+    <Link href={href} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+      <ArrowLeft className="size-4" aria-hidden /> Todas las marcas
+    </Link>
   );
 }
 
