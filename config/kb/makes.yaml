@@ -1,0 +1,205 @@
+# Curated list of vehicle makes (manufacturers) for the knowledge base.
+#
+# Read by `kb clean` (kb/identity.py). A make found in the listings is accepted automatically
+# only if its spelling matches a name or alias here, compared spelling-insensitively
+# ("AUDI" = "Audi", "Landrover" = "Land Rover"). Anything else goes to human review: it may be
+# a real make missing from this list (add it) or not a vehicle make at all.
+#
+# class: what the make builds by default.
+#   car | motorcycle               in scope (mixed makes like Honda, Suzuki, BMW get the class
+#                                  from each listing: a listing marked Motorcycle is a moto)
+#   heavy | machinery | golf_cart  out of scope: their listings stay in staging, excluded
+#   | bicycle | trailer | atv      with that reason (kb.exclusion_reason)
+
+makes:
+  # --- cars & light commercial --------------------------------------------------------
+  - {name: Alfa Romeo, country: Italy, class: car}
+  - {name: Audi, country: Germany, class: car}
+  - {name: BAIC, country: China, class: car}
+  - {name: BMW, country: Germany, class: car}
+  - {name: Brilliance, country: China, class: car}
+  - {name: Buick, country: United States, class: car}
+  - {name: BYD, country: China, class: car}
+  - {name: Cadillac, country: United States, class: car}
+  - {name: Changan, country: China, class: car}
+  - {name: Changhe, country: China, class: car}
+  - {name: Chery, country: China, class: car}
+  - {name: Chevrolet, country: United States, class: car}
+  - {name: Chrysler, country: United States, class: car}
+  - {name: Citroën, country: France, class: car}
+  - {name: Cupra, country: Spain, class: car}
+  - {name: Daewoo, country: South Korea, class: car}
+  - {name: Daihatsu, country: Japan, class: car}
+  - {name: Datsun, country: Japan, class: car}
+  - {name: DFSK, country: China, class: car}
+  - {name: Dodge, country: United States, class: car}
+  - {name: Dongfeng, country: China, class: car}
+  - {name: DS, country: France, class: car}
+  - {name: FAW, country: China, class: car}
+  - {name: Fiat, country: Italy, class: car}
+  - {name: Ford, country: United States, class: car}
+  - {name: GAC, country: China, class: car}
+  - {name: Geely, country: China, class: car}
+  - {name: GMC, country: United States, class: car}
+  - {name: Great Wall, country: China, class: car}
+  - {name: Hafei, country: China, class: car}
+  - {name: Haval, country: China, class: car}
+  - {name: Honda, country: Japan, class: car}
+  - {name: Hummer, country: United States, class: car}
+  - {name: Hyundai, country: South Korea, class: car}
+  - {name: Isuzu, country: Japan, class: car}
+  - {name: JAC, country: China, class: car}
+  - {name: Jaguar, country: United Kingdom, class: car}
+  - {name: Jeep, country: United States, class: car}
+  - {name: Jetour, country: China, class: car}
+  - {name: Jinbei, country: China, class: car}
+  - {name: JMC, country: China, class: car}
+  - {name: Joylong, country: China, class: car}
+  - {name: Karry, country: China, class: car}
+  - {name: Kia, country: South Korea, class: car}
+  - {name: Lada, country: Russia, class: car}
+  - {name: Land Rover, country: United Kingdom, class: car}
+  - {name: Leapmotor, country: China, class: car}
+  - {name: Lexus, country: Japan, class: car}
+  - {name: Lifan, country: China, class: car}
+  - {name: Mahindra, country: India, class: car}
+  - {name: Maruti Suzuki, country: India, class: car, aliases: [Maruti]}
+  - {name: Maserati, country: Italy, class: car}
+  - {name: Maxus, country: China, class: car}
+  - {name: Mazda, country: Japan, class: car}
+  - {name: Mercedes-Benz, country: Germany, class: car, aliases: [Mercedes]}
+  - {name: MG, country: China, class: car}
+  - {name: Mini, country: United Kingdom, class: car, aliases: [Mini Cooper]}
+  - {name: Mitsubishi, country: Japan, class: car}
+  - {name: Nissan, country: Japan, class: car}
+  - {name: Opel, country: Germany, class: car}
+  - {name: Packard, country: United States, class: car}
+  - {name: Peugeot, country: France, class: car}
+  - {name: Plymouth, country: United States, class: car}
+  - {name: Pontiac, country: United States, class: car}
+  - {name: Porsche, country: Germany, class: car}
+  - {name: RAM, country: United States, class: car}
+  - {name: Renault, country: France, class: car}
+  - {name: SEAT, country: Spain, class: car}
+  - {name: Skoda, country: Czech Republic, class: car}
+  - {name: Soueast, country: China, class: car}
+  - {name: SsangYong, country: South Korea, class: car}
+  - {name: Subaru, country: Japan, class: car}
+  - {name: Suzuki, country: Japan, class: car}
+  - {name: Tata, country: India, class: car}
+  - {name: Tesla, country: United States, class: car}
+  - {name: Toyota, country: Japan, class: car}
+  - {name: UAZ, country: Russia, class: car}
+  - {name: VinFast, country: Vietnam, class: car}
+  - {name: Volkswagen, country: Germany, class: car}
+  - {name: Volvo, country: Sweden, class: car}
+  - {name: Willys, country: United States, class: car}
+  - {name: Zastava, country: Serbia, class: car}
+  - {name: Zhidou, country: China, class: car}
+  - {name: Zotye, country: China, class: car}
+
+  # added 2026-11-24 (seen in the listings)
+  - {name: Acura, country: Japan, class: car}
+  - {name: AMC, country: United States, class: car}
+  - {name: Asia Motors, country: South Korea, class: car, aliases: [Asia]}
+  - {name: Aston Martin, country: United Kingdom, class: car}
+  - {name: Bentley, country: United Kingdom, class: car}
+  - {name: BrightDrop, country: United States, class: car}
+  - {name: Fisker, country: United States, class: car}
+  - {name: Genesis, country: South Korea, class: car}
+  - {name: Infiniti, country: Japan, class: car}
+  - {name: INEOS, country: United Kingdom, class: car}
+  - {name: Lamborghini, country: Italy, class: car}
+  - {name: Lincoln, country: United States, class: car}
+  - {name: Lucid, country: United States, class: car}
+  - {name: McLaren, country: United Kingdom, class: car}
+  - {name: Polestar, country: Sweden, class: car}
+  - {name: Rivian, country: United States, class: car}
+  - {name: Rolls-Royce, country: United Kingdom, class: car}
+  - {name: Saturn, country: United States, class: car}
+  - {name: Scion, country: Japan, class: car}
+
+  # --- trucks & buses -----------------------------------------------------------------
+  - {name: DAF, country: Netherlands, class: heavy}
+  - {name: Foton, country: China, class: car}
+  - {name: Freightliner, country: United States, class: heavy}
+  - {name: Fuso, country: Japan, class: heavy}
+  - {name: Golden Dragon, country: China, class: heavy}
+  - {name: Higer, country: China, class: heavy}
+  - {name: Hino, country: Japan, class: heavy}
+  - {name: International, country: United States, class: heavy}
+  - {name: Iveco, country: Italy, class: heavy}
+  - {name: Kenworth, country: United States, class: heavy}
+  - {name: Mack, country: United States, class: heavy}
+  - {name: Oshkosh, country: United States, class: heavy}
+  - {name: Pegaso, country: Spain, class: heavy}
+  - {name: Scania, country: Sweden, class: heavy}
+  - {name: Shacman, country: China, class: heavy}
+  - {name: Sinotruk, country: China, class: heavy}
+
+  # --- motorcycles --------------------------------------------------------------------
+  - {name: AKT, country: Colombia, class: motorcycle}
+  - {name: Aprilia, country: Italy, class: motorcycle}
+  - {name: Bajaj, country: India, class: motorcycle}
+  - {name: Benelli, country: Italy, class: motorcycle}
+  - {name: Can-Am, country: Canada, class: motorcycle}
+  - {name: CFMoto, country: China, class: motorcycle}
+  - {name: Ducati, country: Italy, class: motorcycle}
+  - {name: Harley-Davidson, country: United States, class: motorcycle}
+  - {name: Hero, country: India, class: motorcycle}
+  - {name: Husqvarna, country: Sweden, class: motorcycle}
+  - {name: Hyosung, country: South Korea, class: motorcycle}
+  - {name: Kawasaki, country: Japan, class: motorcycle}
+  - {name: Keeway, country: China, class: motorcycle}
+  - {name: KTM, country: Austria, class: motorcycle}
+  - {name: Kymco, country: Taiwan, class: motorcycle}
+  - {name: NIU, country: China, class: motorcycle}
+  - {name: Piaggio, country: Italy, class: motorcycle}
+  - {name: Royal Enfield, country: India, class: motorcycle}
+  - {name: Shineray, country: China, class: motorcycle}
+  - {name: SYM, country: Taiwan, class: motorcycle}
+  - {name: Triumph, country: United Kingdom, class: motorcycle}
+  - {name: TVS, country: India, class: motorcycle}
+  - {name: UM, country: United States, class: motorcycle}
+  - {name: Vespa, country: Italy, class: motorcycle}
+  - {name: Victory, country: Colombia, class: motorcycle}
+  - {name: Yamaha, country: Japan, class: motorcycle}
+  - {name: Auteco, country: Colombia, class: motorcycle}
+  - {name: Sachs, country: Germany, class: motorcycle}
+  - {name: Vento, country: Mexico, class: motorcycle}
+
+  # --- out of scope: machinery, golf carts, bicycles, trailers -------------------------
+  - {name: Bobcat, country: United States, class: machinery}
+  - {name: Caterpillar, country: United States, class: machinery}
+  - {name: Dynapac, country: Sweden, class: machinery}
+  - {name: John Deere, country: United States, class: machinery}
+  - {name: Komatsu, country: Japan, class: machinery}
+  - {name: New Holland, country: Italy, class: machinery}
+  - {name: E-Z-GO, country: United States, class: golf_cart}
+  - {name: Ecobike, class: bicycle}
+  - {name: Ecobici, class: bicycle}
+  - {name: Electribike, class: bicycle}
+  - {name: Remolque, class: trailer, aliases: [Trailer]}
+
+# Model families: the portal puts the real model's number at the start of the version
+# (KTM "Duke" + "390 NG" = Duke 390, version NG). `kb normalize` sends each listing whose
+# version starts with a 2-4 digit number to "<model> <number>" (created and accepted on
+# demand, with this spelling); listings without that number stay on the family. Only list a
+# model when the number really is part of the model name: Mercedes "Clase C" + "180" or
+# Mazda "BT-50" + "2200" are versions, not models. A reviewer can mark more families from
+# the review site ("Dividir por número de versión"). class: optional, for the split models.
+split_models:
+  - {make: AKT, model: CR4}
+  - {make: AKT, model: TT}
+  - {make: AKT, model: TTR}
+  - {make: Bajaj, model: Pulsar}
+  - {make: Benelli, model: TRK}
+  - {make: DFSK, model: Glory}
+  - {make: Honda, model: CBF}
+  - {make: Honda, model: XR}
+  - {make: KTM, model: Adventure}
+  - {make: KTM, model: Duke}
+  - {make: Suzuki, model: DR}
+  - {make: Suzuki, model: Gixxer}
+  - {make: Toyota, model: Land Cruiser}
+  - {make: Yamaha, model: XTZ}

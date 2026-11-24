@@ -32,6 +32,17 @@ PYTHONPATH=src python -m vehicle_scraper export --format json --site carroya
 PYTHONPATH=src python -m vehicle_scraper export --format xlsx   # stdlib-only writer in xlsx.py
 PYTHONPATH=src python -m vehicle_scraper coverage
 PYTHONPATH=src python -m vehicle_scraper new-site <url> [--name --country --currency --browser --force --dry-run]
+
+# knowledge base (PostgreSQL "omnibase", optional extra: pip install -e .[kb]); URL from OMNIBASE_DATABASE_URL
+PYTHONPATH=src python -m vehicle_scraper kb migrate                     # or: alembic upgrade head
+PYTHONPATH=src python -m vehicle_scraper kb import --sqlite data/vehicles.sqlite
+PYTHONPATH=src python -m vehicle_scraper kb clean                       # makes, models, trims, fields + review cases
+PYTHONPATH=src python -m vehicle_scraper kb build                       # generations, powertrains, variants (after clean)
+PYTHONPATH=src python -m vehicle_scraper kb status
+# re-extract only some listings after a parser fix (one id per line; ask before running)
+PYTHONPATH=src python -m vehicle_scraper run --site driveway --ids-file data/reextract/ids.txt
+# kb tests against a throwaway Postgres (they drop the schemas; never point them at omnibase)
+OMNIBASE_TEST_DATABASE_URL=postgresql://postgres:test@localhost:55441/omnibase_test python -m pytest tests/test_kb_pg.py
 ```
 
 There is no lint/format command configured in this repo.
@@ -126,6 +137,69 @@ label/feature synonyms go in `mapping.py`'s `LABEL_RULES`/`FEATURE_PATTERNS` wit
 in `tests/test_mapping.py`. Workflow: run the new site with `--limit 5 -v`, then check
 `data/coverage.csv` and the `parse_warnings` column; set `SAVE_RAW=true` to keep parsed JSON for
 debugging.
+
+## Knowledge base (`kb/`, PostgreSQL `omnibase`)
+
+Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
+powertrain → commercial variant per country and trim, with structured evolution notes.
+So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
+- **The database is created by its owner.** Code only creates objects, through Alembic
+  (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
+  schemas. `alembic_version` stays in `public`.
+- `kb`: closed catalogs (`country`, `vehicle_class`, `fuel_type`, `transmission_type`,
+  `drivetrain`, `body_style`, `segment`, `headlight_type`, `brake_type`), each
+  `code`/`name_es`/`name_en`. Segments: cars A-F (body style is a separate axis, so "SUV
+  segment B" = SUV + B), pickups their own (`PickupCompact`/`Midsize`/`Fullsize`, with
+  `body_style_code = 'Pickup'`), motorcycles their own; `vehicle_class_code` says which. Codes for fuel/transmission/drivetrain/body are exactly the
+  `models.py` values (`tests/test_kb_catalogs.py` fails when they drift, so add a migration).
+  `source_site` holds each site's country and `ai_allowed`/`training_allowed`, all false until
+  the site's terms are reviewed (Cofino must stay false).
+- `staging.raw_listing`: each vehicles.sqlite row as read (`data` jsonb), opened read-only; a
+  new version only when `row_hash` (sha256 without `scraped_at`) changes. Rows from sites not
+  in `kb.source_site` are skipped and reported, never imported with a guessed country.
+- Writers take `db.take_writer_lock` (transaction-scoped advisory lock); each command is one
+  transaction. Seed values are frozen in the migration, never imported from live code; a new
+  catalog value goes in a new migration's `CATALOG_ADDITIONS` (read by the catalog test).
+- `kb clean` (`kb/clean.py`, helpers in `kb/identity.py`, make list `config/kb/makes.yaml`)
+  rebuilds `kb.clean_listing` from the current staging versions:
+  - Makes by spelling-insensitive alias (`compact_key`); a make not in makes.yaml becomes
+    `pending_review` + `unknown_make`. The make's `class` decides scope: heavy, machinery,
+    golf_cart, bicycle, trailer, atv are excluded with a `kb.exclusion_reason`; so are ATV
+    names, motocarros/mototaxis (`ThreeWheeler`, migration 0005), heavy trucks (body Truck that isn't a chassis cab), and model years outside
+    1990 .. current year + 1. Excluded listings keep their row. Chassis cabs count as Pickup.
+  - `split_tokens` moves mechanical words out of model/trim names ("Touring 2.0 Suv Automatico
+    4x2" -> "Touring" + 2.0 L, SUV, Automatic, 2WD). Plain-number models stay (Ram 1500,
+    Mazda 3); a model of only a displacement ("1.3") opens `model_is_attributes`.
+  - New model names: accepted with >= 5 listings or >= 2 sites, else `weak_model`. Model
+    families split by the version's number (`split_models` in makes.yaml: Duke + "390").
+  - The listing's structured field wins over a word in its name; a disagreement opens
+    `field_conflict` (4x4 vs AWD and 4x2 vs FWD/RWD are not disagreements). A name only
+    refines a generic value: Automatic + "CVT" -> CVT, 2WD + "FWD" -> FWD
+    (provenance `trim_text_refines_listing`). Implausible values stay and open a case.
+  - `kb.review_item`: one row per case for good (decided cases are never asked again; pending
+    ones the rules stop seeing become `obsolete`, but only for the issues of the command that
+    opened them: `clean.write_cases(cur, cases, ISSUES)`). Decided `unknown_make`/`weak_model`
+    set the make/model status with `source = 'manual'`, which the rules never change.
+- `kb build` (`kb/build.py`, field placement in `kb/levels.py`) builds the three levels from
+  in-scope listings of accepted models:
+  - `kb.generation` starts `provisional`, one per model + body (observed years); `year_from`/
+    `year_to` are the official cycle. A listing without body joins its model's only generation.
+    Engine changes between years open `generation_split` (a person decides; an approved split
+    cuts the generation at that year, `split_from`). A trigger checks the segment against the
+    model's class and the body (pickups need pickup segments).
+  - `kb.powertrain` keyed by fuel|transmission|drivetrain|displacement|cylinders (`match_key`,
+    frozen; cylinders only without displacement). Keys go most complete first; a key joins the
+    only compatible powertrain (Automatic~CVT/DCT, 2WD~FWD/RWD, AWD~4WD, 0.1 L), creates one if
+    none, and stays `ambiguous_powertrain` if several. Never guessed.
+  - `kb.commercial_variant` = generation + powertrain + country + `trim_key` (`''` = trim
+    unknown, kept apart). `kb.listing_level` says where each listing landed or why not.
+  - `kb.spec_evidence` holds candidates per entity/field/source; listing evidence is recomputed
+    each run (mechanical: 1 plausible listing, most repeated, >10 % spread opens
+    `spec_disagreement`; equipment: >= 2 listings and >= 70 %), other sources are never
+    touched. Level columns are **derived**: the best accepted evidence wins (manual > external >
+    listings > ai), so change a value by adding evidence, never by editing the column.
+  - Year-consistent equipment flips open `evolution_note`; an approved one becomes a
+    `kb.evolution_note` (field, value, year_from).
 
 ## Current site status (see README.md for the up-to-date table)
 

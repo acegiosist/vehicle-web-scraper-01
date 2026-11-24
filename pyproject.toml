@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40"]
+kb = ["psycopg[binary]>=3.1", "alembic>=1.13", "SQLAlchemy>=2.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
@@ -25,6 +26,9 @@ vehicle-scraper = "vehicle_scraper.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"vehicle_scraper.kb" = ["migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

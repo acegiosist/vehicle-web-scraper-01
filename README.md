@@ -155,6 +155,7 @@ src/vehicle_scraper/
   cli.py         command line
   scaffold.py    `new-site`: probe a site from a URL and generate its scraper + test
   sites/         one module per site + generic YAML-driven scraper
+  kb/            knowledge base on PostgreSQL (omnibase): Alembic migrations, importer, `kb` CLI
 config/sites.yaml  extra sites without code
 tests/           offline tests with fixtures captured from the real sites
 ```

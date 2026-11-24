@@ -1,0 +1,292 @@
+"""Knowledge base against a real PostgreSQL. Skipped unless OMNIBASE_TEST_DATABASE_URL points at
+a throwaway database (never omnibase itself: the tests drop and recreate the schemas), e.g.
+
+    docker run -d --name omnibase-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=omnibase_test \
+        -p 55441:5432 postgres:16-alpine
+    OMNIBASE_TEST_DATABASE_URL=postgresql://postgres:test@localhost:55441/omnibase_test python -m pytest tests/test_kb_pg.py
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+psycopg = pytest.importorskip("psycopg")
+pytest.importorskip("alembic")
+
+from alembic import command  # noqa: E402
+
+from vehicle_scraper.cli import main  # noqa: E402
+from vehicle_scraper.kb.cli import alembic_config  # noqa: E402
+from vehicle_scraper.kb.importer import import_sqlite  # noqa: E402
+from vehicle_scraper.models import VehicleRecord  # noqa: E402
+from vehicle_scraper.storage import Storage  # noqa: E402
+
+URL = os.getenv("OMNIBASE_TEST_DATABASE_URL", "")
+pytestmark = pytest.mark.skipif(not URL, reason="OMNIBASE_TEST_DATABASE_URL not set")
+
+
+@pytest.fixture
+def conn():
+    cfg = alembic_config(URL)
+    command.downgrade(cfg, "base")
+    command.upgrade(cfg, "head")
+    # autocommit: a test's SELECT must not hold locks that a migration run by the same test
+    # (or the next test's downgrade) would wait on. import_sqlite opens its own transaction.
+    with psycopg.connect(URL, autocommit=True) as c:
+        yield c
+
+
+def rec(site="carroya", listing_id="1", **kw) -> VehicleRecord:
+    base = dict(source_site=site, source_url=f"https://example/{listing_id}", listing_id=listing_id,
+                make="Hyundai", model="Creta", trim="Advance 1.6 Suv Automatico 4x2", model_year=2022)
+    return VehicleRecord(**(base | kw))
+
+
+def write_sqlite(path: Path, records) -> Path:
+    path.unlink(missing_ok=True)
+    store = Storage(path)
+    for r in records:
+        store.save(r)
+    store.close()
+    return path
+
+
+def q(conn, sql, *args):
+    with conn.cursor() as cur:
+        cur.execute(sql, args or None)
+        return cur.fetchall()
+
+
+def test_migration_seeds_catalogs(conn):
+    assert q(conn, "SELECT code FROM kb.fuel_type ORDER BY sort_order") == [
+        ("Gasoline",), ("Diesel",), ("Hybrid",), ("EV",), ("CNG",), ("Flex",)]
+    assert q(conn, "SELECT count(*) FROM kb.body_style") == [(11,)]
+    assert q(conn, "SELECT vehicle_class_code, count(*) FROM kb.segment GROUP BY 1 ORDER BY 1") \
+        == [("car", 9), ("motorcycle", 7)]
+    assert q(conn, "SELECT code FROM kb.segment WHERE body_style_code = 'Pickup' ORDER BY sort_order") \
+        == [("PickupCompact",), ("PickupMidsize",), ("PickupFullsize",)]
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        q(conn, "INSERT INTO kb.segment VALUES ('X', 'x', 'x', 0, true, 'truck', NULL)")
+    assert q(conn, "SELECT country_code, ai_allowed, training_allowed FROM kb.source_site WHERE code='cofino'") \
+        == [("GT", False, False)]
+    with pytest.raises(psycopg.errors.CheckViolation):
+        q(conn, "INSERT INTO kb.country VALUES ('col', 'x', 'x', 'COP', true)")
+
+
+def test_segments_downgrade_and_upgrade_again(conn):
+    cfg = alembic_config(URL)
+    command.downgrade(cfg, "0001_catalogs_staging")
+    assert q(conn, "SELECT count(*) FROM kb.segment") == [(0,)]
+    assert q(conn, "SELECT count(*) FROM kb.fuel_type WHERE code = 'Flex'") == [(0,)]
+    command.upgrade(cfg, "head")
+    assert q(conn, "SELECT count(*) FROM kb.segment") == [(16,)]
+
+
+def test_import_versions_and_idempotency(conn, tmp_path):
+    db = tmp_path / "vehicles.sqlite"
+    write_sqlite(db, [rec(listing_id="1"), rec(listing_id="2", model_year=2024),
+                      rec(site="tucarro", listing_id="9")])
+    s1 = import_sqlite(conn, db)
+    assert (s1["new_listings"], s1["new_versions"], s1["unchanged"]) == (2, 0, 0)
+    assert s1["skipped"] == {"tucarro": 1}                      # site not registered: not guessed
+
+    # Same file again: still re-read, because the first import skipped rows; nothing new.
+    s2 = import_sqlite(conn, db)
+    assert (s2["status"], s2["new_listings"], s2["new_versions"], s2["unchanged"]) == ("imported", 0, 0, 2)
+
+    # Re-scrape: listing 1 unchanged except scraped_at, listing 2 changed, listing 3 new.
+    write_sqlite(db, [rec(listing_id="1"), rec(listing_id="2", model_year=2025), rec(listing_id="3")])
+    s3 = import_sqlite(conn, db)
+    assert (s3["new_listings"], s3["new_versions"], s3["unchanged"]) == (1, 1, 1)
+    assert q(conn, "SELECT version, valid_to IS NULL, (data->>'model_year')::int FROM staging.raw_listing "
+                   "WHERE listing_id='2' ORDER BY version") == [(1, False, 2024), (2, True, 2025)]
+    assert q(conn, "SELECT count(*), min(country_code) FROM staging.current_listing") == [(3, "CO")]
+
+    # A fully imported file is skipped by its sha256, unless forced.
+    assert import_sqlite(conn, db)["status"] == "already_imported"
+    assert import_sqlite(conn, db, force=True)["unchanged"] == 3
+
+
+def test_raw_row_is_kept_as_read(conn, tmp_path):
+    db = write_sqlite(tmp_path / "v.sqlite", [rec(abs=True, parse_warnings=["could not parse x from 'y'"])])
+    import_sqlite(conn, db)
+    data = q(conn, "SELECT data FROM staging.raw_listing")[0][0]
+    assert data["abs"] == 1 and data["trim"] == "Advance 1.6 Suv Automatico 4x2"
+    assert data["parse_warnings"] == "could not parse x from 'y'"
+
+
+def test_cli_migrate_import_status(conn, tmp_path, capsys):
+    db = write_sqlite(tmp_path / "v.sqlite", [rec()])
+    assert main(["kb", "--database-url", URL, "migrate"]) == 0
+    assert main(["kb", "--database-url", URL, "import", "--sqlite", str(db)]) == 0
+    assert main(["kb", "--database-url", URL, "status"]) == 0
+    out = capsys.readouterr().out
+    assert "1 new listings" in out and "carroya" in out and "fuel_type=6" in out
+
+
+# --- kb clean ---------------------------------------------------------------------------------
+from vehicle_scraper.kb.clean import clean  # noqa: E402
+
+
+def cleaned(conn, tmp_path, records, today=None):
+    db = write_sqlite(tmp_path / "c.sqlite", records)
+    import_sqlite(conn, db, force=True)
+    from datetime import date
+    return clean(conn, today=today or date(2026, 11, 24))
+
+
+def test_clean_identity_scope_and_fields(conn, tmp_path):
+    recs = [rec(listing_id=str(i), make="HYUNDAI" if i % 2 else "Hyundai", model="CRETA",
+                trim="Advance 1.6 Suv Automatico 4x2", transmission_type="Automatic") for i in range(5)]
+    recs += [
+        rec(listing_id="w1", make="Kia", model="Rarito", trim="LX"),                  # weak model
+        rec(listing_id="u1", make="Zorgmobil", model="Z1", trim=None),                 # unknown make
+        rec(listing_id="h1", make="Kenworth", model="T800", trim=None),                # heavy make
+        rec(listing_id="c1", make="Ford", model="Mustang", trim="GT", model_year=1967),  # classic
+        rec(listing_id="a1", make="Yamaha", model="Raptor", trim="700 Cuatrimoto", vehicle_type="Motorcycle"),
+        rec(listing_id="t1", make="Bajaj", model="Motocarro", trim="Torito", vehicle_type="Motorcycle"),
+        rec(listing_id="x1", make="Chevrolet", model="1.3", trim="LS"),                # model is attributes
+        rec(listing_id="k1", make="Toyota", model="Hilux", trim="2.8 4x4 Aut", drivetrain="2WD",
+            engine_displacement_l=2.4),                                                # conflicts
+        rec(listing_id="v1", make="Renault", model="Duster", trim="Intens 4x2 CVT", transmission_type="Automatic",
+            drivetrain="2WD"),                                                         # CVT refines Automatic
+    ]
+    s = cleaned(conn, tmp_path, recs)
+    assert s["excluded"] == {"ATV": 1, "Classic": 1, "Heavy": 1, "ThreeWheeler": 1}
+    # One model for all spellings, accepted (5 listings), with the trim cleaned once.
+    rows = q(conn, """SELECT m.name, m.status, l.trim_name, l.engine_displacement_l::float, l.body_style_code,
+                             l.transmission_type_code, l.drivetrain_code, l.provenance->>'body_style'
+                      FROM kb.clean_listing l JOIN kb.model m ON m.id = l.model_id
+                      WHERE l.listing_id = '0'""")
+    assert rows == [("Creta", "accepted", "Advance", 1.6, "SUV", "Automatic", "2WD", "trim_text")]
+    assert q(conn, "SELECT count(DISTINCT model_id) FROM kb.clean_listing WHERE listing_id ~ '^[0-4]$'") == [(1,)]
+    pending = dict(q(conn, "SELECT issue, count(*) FROM kb.review_item WHERE status='pending' GROUP BY 1"))
+    assert pending == {"weak_model": 4, "unknown_make": 1, "model_is_attributes": 1, "field_conflict": 2}
+    # Hilux: structured values stay, the name's go to the case.
+    assert q(conn, "SELECT drivetrain_code, engine_displacement_l::float FROM kb.clean_listing "
+                   "WHERE listing_id='k1'") == [("2WD", 2.4)]
+    assert q(conn, "SELECT field, current_value, proposed_value FROM kb.review_item "
+                   "WHERE issue='field_conflict' ORDER BY field") == [
+        ("drivetrain", "2WD", "4WD"), ("engine_displacement_l", 2.4, 2.8)]
+    assert q(conn, "SELECT status FROM kb.make WHERE name='Zorgmobil'") == [("pending_review",)]
+    assert q(conn, "SELECT transmission_type_code, provenance->>'transmission_type', drivetrain_code "
+                   "FROM kb.clean_listing WHERE listing_id='v1'") == [("CVT", "trim_text_refines_listing", "2WD")]
+    assert q(conn, "SELECT listing_id, vehicle_class_code FROM kb.clean_listing WHERE listing_id IN ('h1', 't1') "
+                   "ORDER BY 1") == [("h1", None), ("t1", None)]
+
+
+def test_clean_is_idempotent_and_keeps_decisions(conn, tmp_path):
+    recs = [rec(listing_id="w1", make="Kia", model="Rarito", trim="LX")]
+    cleaned(conn, tmp_path, recs)
+    conn.execute("UPDATE kb.review_item SET status='approved', decided_by='test', decided_at=now() "
+                 "WHERE issue='weak_model'")
+    s = cleaned(conn, tmp_path, recs)
+    assert q(conn, "SELECT status, source FROM kb.model WHERE name='Rarito'") == [("accepted", "manual")]
+    assert q(conn, "SELECT status FROM kb.review_item") == [("approved",)]          # not asked again
+    assert s["review_pending"] == {}
+    assert q(conn, "SELECT count(*) FROM kb.model") == [(1,)] and q(conn, "SELECT count(*) FROM kb.clean_listing") == [(1,)]
+
+
+def test_clean_obsoletes_cases_that_went_away(conn, tmp_path):
+    cleaned(conn, tmp_path, [rec(listing_id="w1", make="Kia", model="Rarito", trim="LX")])
+    more = [rec(listing_id=f"w{i}", make="Kia", model="Rarito", trim="LX") for i in range(1, 6)]
+    cleaned(conn, tmp_path, more)                                   # now 5 listings: accepted by rule
+    assert q(conn, "SELECT status FROM kb.model WHERE name='Rarito'") == [("accepted",)]
+    assert q(conn, "SELECT status FROM kb.review_item WHERE issue='weak_model'") == [("obsolete",)]
+
+
+def test_clean_model_family_and_chassis_cab(conn, tmp_path):
+    recs = [rec(listing_id=f"d{i}", make="KTM", model="Duke", trim="390 NG", vehicle_type="Motorcycle",
+                engine_displacement_l=0.373) for i in range(5)]
+    recs += [rec(site="driveway", listing_id=f"r{i}", make="Ram", model="3500 Cab/Chassis", trim="Tradesman",
+                 body_style="Truck", vehicle_type="Truck", model_year=2025) for i in range(5)]
+    cleaned(conn, tmp_path, recs)
+    assert q(conn, "SELECT DISTINCT m.name, l.trim_name, l.body_style_code, l.vehicle_class_code FROM kb.clean_listing l "
+                   "JOIN kb.model m ON m.id=l.model_id WHERE l.listing_id LIKE 'd%'") == [
+        ("Duke 390", "NG", "Motorcycle", "motorcycle")]
+    assert q(conn, "SELECT DISTINCT excluded_reason, body_style_code, provenance->>'body_style' "
+                   "FROM kb.clean_listing WHERE listing_id LIKE 'r%'") == [(None, "Pickup", "chassis_cab")]
+
+
+# --- kb build ---------------------------------------------------------------------------------
+from vehicle_scraper.kb.build import build  # noqa: E402
+
+
+def built(conn, tmp_path, records):
+    cleaned(conn, tmp_path, records)
+    return build(conn)
+
+
+def creta(listing_id, year, disp, *, site="carroya", trim="Advance", **kw):
+    return rec(site=site, listing_id=listing_id, **({"make": "Hyundai", "model": "Creta", "trim": trim,
+               "model_year": year, "engine_displacement_l": disp, "fuel_type": "Gasoline",
+               "transmission_type": "Automatic", "body_style": "SUV"} | kw))
+
+
+def test_build_levels_and_publishing(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121, sunroof=True) for i in range(4)]
+    recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD", sunroof=i < 3) for i in range(4)]
+    recs += [creta("n1", 2021, 1.5)]                                  # no drivetrain: joins the only 1.5
+    recs += [creta("u1", 2021, None, site="cars24", trim=None, body_style=None)]   # no body, no trim, IN
+    s = built(conn, tmp_path, recs)
+    # u1 has no displacement and no drivetrain: compatible with both engines, so it isn't guessed.
+    assert s["assigned"] == 9 and s["unassigned"] == {"ambiguous_powertrain": 1}
+    assert q(conn, "SELECT count(*), min(status) FROM kb.generation WHERE listings > 0") == [(1, "provisional")]
+    assert q(conn, "SELECT engine_displacement_l::float, drivetrain_code, horsepower_hp, listings FROM kb.powertrain "
+                   "WHERE listings > 0 ORDER BY 1") == [(1.5, "FWD", None, 5), (1.6, "FWD", 121, 4)]
+    assert q(conn, "SELECT generation_id IS NOT NULL FROM kb.listing_level WHERE listing_id = 'u1'") == [(True,)]
+    # equipment: 4/4 sunroof on the 1.6, 3/4 (75 %) on the 1.5 -> both published True
+    assert q(conn, "SELECT DISTINCT sunroof FROM kb.commercial_variant WHERE trim_key = 'advance'") == [(True,)]
+    # The engine changes between 2017 and 2021: a split is proposed, not made.
+    split = q(conn, "SELECT proposed_value FROM kb.review_item WHERE issue = 'generation_split'")
+    assert split == [({"year_from": 2021},)]
+
+
+def test_build_ambiguous_powertrain_is_not_guessed(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(3)]
+    recs += [creta(f"b{i}", 2017, 2.0, drivetrain="FWD") for i in range(3)]
+    recs += [creta("x1", 2017, None, drivetrain="FWD")]               # 1.6 or 2.0? unknown
+    s = built(conn, tmp_path, recs)
+    assert s["unassigned"] == {"ambiguous_powertrain": 1}
+    assert q(conn, "SELECT generation_id IS NOT NULL, powertrain_id, unassigned_reason FROM kb.listing_level "
+                   "WHERE listing_id = 'x1'") == [(True, None, "ambiguous_powertrain")]
+
+
+def test_build_is_stable_and_applies_decisions(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
+    recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]
+    built(conn, tmp_path, recs)
+    ids = q(conn, "SELECT id FROM kb.powertrain ORDER BY id")
+    built(conn, tmp_path, recs)
+    assert q(conn, "SELECT id FROM kb.powertrain ORDER BY id") == ids             # same ids on re-run
+    conn.execute("UPDATE kb.review_item SET status = 'approved', decided_by = 't', decided_at = now() "
+                 "WHERE issue = 'generation_split'")
+    s = build(conn)
+    gens = q(conn, "SELECT name, year_from, year_to, listings FROM kb.generation ORDER BY id")
+    assert gens == [("Creta (SUV)", 2017, 2020, 4), ("Creta (SUV) (2021+)", 2021, None, 4)]
+    assert s["review_pending"].get("generation_split") is None
+
+
+def test_build_manual_evidence_wins_and_segment_trigger(conn, tmp_path):
+    built(conn, tmp_path, [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(5)])
+    pid = q(conn, "SELECT id FROM kb.powertrain")[0][0]
+    conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status) "
+                 "VALUES ('powertrain', %s, 'horsepower_hp', 'manual', '123', 'accepted')", (pid,))
+    build(conn)
+    assert q(conn, "SELECT horsepower_hp FROM kb.powertrain") == [(123,)]
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    conn.execute("UPDATE kb.generation SET segment_code = 'B' WHERE id = %s", (gid,))
+    with pytest.raises(psycopg.errors.RaiseException):
+        conn.execute("UPDATE kb.generation SET segment_code = 'PickupMidsize' WHERE id = %s", (gid,))
+    with pytest.raises(psycopg.errors.RaiseException):
+        conn.execute("UPDATE kb.generation SET segment_code = 'Scooter' WHERE id = %s", (gid,))
+
+
+def test_clean_keeps_unknown_make_case_open_on_rerun(conn, tmp_path):
+    recs = [rec(listing_id="u1", make="Zorgmobil", model="Z1", trim=None)]
+    cleaned(conn, tmp_path, recs)
+    s = cleaned(conn, tmp_path, recs)                       # the make now has an alias
+    assert s["review_pending"].get("unknown_make") == 1
+    assert q(conn, "SELECT status FROM kb.review_item WHERE issue = 'unknown_make'") == [("pending",)]

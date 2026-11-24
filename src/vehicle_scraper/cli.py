@@ -8,6 +8,7 @@
     python -m vehicle_scraper export --format xlsx
     python -m vehicle_scraper coverage
     python -m vehicle_scraper new-site https://www.example-autos.com/usados --dry-run
+    python -m vehicle_scraper kb migrate | import | status     (knowledge base, see kb/cli.py)
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from pydantic import ValidationError
 
 from .config import settings
 from .http import BlockedError, DisallowedError
+from .kb import cli as kb_cli
 from .report import write_coverage
 from .scaffold import cli_new_site
 from .sites import REGISTRY, load_yaml_sites
@@ -178,9 +180,14 @@ def main(argv: list[str] | None = None) -> int:
     ns.add_argument("--force", action="store_true", help="overwrite an existing site module")
     ns.add_argument("--dry-run", action="store_true", help="print the generated files, write nothing")
 
+    kb_cli.add_parser(sub)
+
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    if args.cmd == "kb":
+        return kb_cli.run(args)
+
     load_yaml_sites(args.sites_file)
 
     if args.cmd == "new-site":
