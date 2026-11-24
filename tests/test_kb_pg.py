@@ -256,6 +256,26 @@ def test_build_ambiguous_powertrain_is_not_guessed(conn, tmp_path):
                    "WHERE listing_id = 'x1'") == [(True, None, "ambiguous_powertrain")]
 
 
+def test_build_never_recreates_a_rejected_powertrain(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(3)]
+    recs += [creta(f"b{i}", 2017, 2.0, drivetrain="FWD") for i in range(3)]
+    recs += [creta("y1", 2017, 1.6)]                                  # no drivetrain: only the 1.6 fits
+    built(conn, tmp_path, recs)
+    pid = q(conn, "SELECT id FROM kb.powertrain WHERE engine_displacement_l = 1.6")[0][0]
+    conn.execute("UPDATE kb.powertrain SET status = 'rejected' WHERE id = %s", (pid,))
+    s = build(conn)                       # used to fail: UNIQUE (generation_id, match_key)
+    assert s["unassigned"] == {"powertrain_rejected": 4}
+    assert q(conn, "SELECT listing_id, powertrain_id, unassigned_reason FROM kb.listing_level "
+                   "WHERE listing_id IN ('a0', 'y1', 'b0') ORDER BY 1") == [
+        ("a0", None, "powertrain_rejected"), ("b0", q(conn, "SELECT id FROM kb.powertrain WHERE "
+                                                           "engine_displacement_l = 2.0")[0][0], None),
+        ("y1", None, "powertrain_rejected")]
+    assert q(conn, "SELECT count(*), max(listings) FROM kb.powertrain WHERE engine_displacement_l = 1.6") == [(1, 0)]
+    # Taking the rejection back brings the listings back on the next build.
+    conn.execute("UPDATE kb.powertrain SET status = 'provisional' WHERE id = %s", (pid,))
+    assert build(conn)["unassigned"] == {}
+
+
 def test_build_is_stable_and_applies_decisions(conn, tmp_path):
     recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
     recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]

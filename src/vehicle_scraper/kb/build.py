@@ -10,7 +10,8 @@ Run after ``kb clean``. In one transaction under the writer lock:
 3. **Powertrains** per generation, keyed by fuel, transmission, drivetrain and displacement (or
    cylinders when there's no displacement). Keys are taken most complete first; a key joins the
    only compatible powertrain, opens a new one when none is, and stays unassigned
-   (``ambiguous_powertrain``) when several are. Ids are stable (``match_key``).
+   (``ambiguous_powertrain``) when several are. Ids are stable (``match_key``). A rejected
+   powertrain is never recreated: listings whose only match it is stay ``powertrain_rejected``.
 4. **Commercial variants**: generation + powertrain + country + trim (``''`` = trim unknown).
 5. **Evidence from listings**, recomputed every run: mechanical numbers from one plausible
    listing (most repeated value; > 10 % spread opens ``spec_disagreement``); equipment with
@@ -298,23 +299,35 @@ ORDER BY id"""):
             g.listings.append(l)
 
         # 3. powertrains ---------------------------------------------------------------------
+        # Rejected powertrains (a person's decision) never get listings and are never recreated:
+        # a listing whose only match is one of them stays unassigned (powertrain_rejected).
         pts: dict[int, list[dict]] = defaultdict(list)
-        for pid, gid, mk, disp, cyl, fuel, trans, drive in _load(cur, """
+        rejected_pts: dict[int, list[dict]] = defaultdict(list)
+        for pid, gid, mk, disp, cyl, fuel, trans, drive, pstatus in _load(cur, """
 SELECT id, generation_id, match_key, engine_displacement_l, engine_cylinders, fuel_type_code,
-       transmission_type_code, drivetrain_code FROM kb.powertrain WHERE status <> 'rejected' ORDER BY id"""):
-            pts[gid].append({"id": pid, "match_key": mk, "fuel": fuel, "trans": trans, "drive": drive,
-                             "disp": float(disp) if disp is not None else None, "cyl": cyl})
+       transmission_type_code, drivetrain_code, status FROM kb.powertrain ORDER BY id"""):
+            (rejected_pts if pstatus == "rejected" else pts)[gid].append(
+                {"id": pid, "match_key": mk, "fuel": fuel, "trans": trans, "drive": drive,
+                 "disp": float(disp) if disp is not None else None, "cyl": cyl})
         all_gens = [g for gl in gens.values() for g in gl]
         for g in all_gens:
             keys = Counter(l.key for l in g.listings)
             order = sorted(keys, key=lambda k: (-sum(v is not None for v in k), -keys[k], match_key(k)))
             resolved: dict[tuple, Optional[int]] = {}
+            rejected_keys: set[tuple] = set()
             for k in order:
                 mk = match_key(k)
+                if any(p["match_key"] == mk for p in rejected_pts[g.id]):
+                    resolved[k] = None                     # exactly the rejected one
+                    rejected_keys.add(k)
+                    continue
                 exact = [p for p in pts[g.id] if p["match_key"] == mk]
                 comp = exact or [p for p in pts[g.id] if _compatible(k, p)]
                 if len(comp) == 1:
                     resolved[k] = comp[0]["id"]
+                elif not comp and any(_compatible(k, p) for p in rejected_pts[g.id]):
+                    resolved[k] = None                     # its only match was rejected
+                    rejected_keys.add(k)
                 elif not comp:
                     fuel, trans, drive, disp, cyl = k
                     cur.execute("""
@@ -330,7 +343,7 @@ VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""", (g.id, mk, fuel, trans, dri
             for l in g.listings:
                 l.powertrain = resolved[l.key]
                 if l.powertrain is None:
-                    l.reason = "ambiguous_powertrain"
+                    l.reason = "powertrain_rejected" if l.key in rejected_keys else "ambiguous_powertrain"
 
         # 4. commercial variants ---------------------------------------------------------------
         variants = {(g, p, c, t): vid for vid, g, p, c, t in _load(cur, """

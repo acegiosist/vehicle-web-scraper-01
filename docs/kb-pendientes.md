@@ -1,6 +1,6 @@
 # Base de conocimiento: pendientes
 
-Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración `0009_review_case_view`).
+Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración `0010_powertrain_rejected`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -31,6 +31,12 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
       cilindraje y tracción.
 - [ ] **Aplicar las notas de evolución a la ficha de cada anuncio según su año**: va con la
       exportación de la ficha final.
+
+- [x] **Rechazar un tren motriz rompía el recálculo** (2026-11-24): corregido en `kb build`; sus
+      anuncios quedan sin asignar (`powertrain_rejected`). Migración `0010_powertrain_rejected`
+      aplicada en omnibase (solo cambia una restricción: no hace falta `portal_role.sql`).
+- [ ] **Estado de la variante comercial**: se puede guardar pero `kb build` no lo usa todavía
+      (una variante rechazada sigue recibiendo anuncios). Falta decidir qué debe pasar.
 
 ## Fases siguientes
 

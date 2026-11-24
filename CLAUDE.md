@@ -158,7 +158,7 @@ debugging.
 
 Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
 powertrain → commercial variant per country and trim, with structured evolution notes.
-So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
+So far (migrations `0001_catalogs_staging` … `0010_powertrain_rejected`):
 - **The database is created by its owner.** Code only creates objects, through Alembic
   (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
   schemas. `alembic_version` stays in `public`.
@@ -206,7 +206,14 @@ So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
   - `kb.powertrain` keyed by fuel|transmission|drivetrain|displacement|cylinders (`match_key`,
     frozen; cylinders only without displacement). Keys go most complete first; a key joins the
     only compatible powertrain (Automatic~CVT/DCT, 2WD~FWD/RWD, AWD~4WD, 0.1 L), creates one if
-    none, and stays `ambiguous_powertrain` if several. Never guessed.
+    none, and stays `ambiguous_powertrain` if several. Never guessed. A `rejected` powertrain
+    is never recreated nor given listings: a key matching it exactly, or whose only compatible
+    powertrain it is, stays `powertrain_rejected` (migration 0010); un-rejecting brings them back.
+  - Status (`provisional` / `verified` / `rejected`, on all three levels) changes only by a
+    person (editor's Estado field; merging rejects the source generation). `verified` only stops
+    new `generation_split` proposals; a rejected generation's listings become unassigned
+    (`no_generation_for_year`), they don't move to a sibling (use Unir for that); variant
+    status isn't read by `kb build` yet.
   - `kb.commercial_variant` = generation + powertrain + country + `trim_key` (`''` = trim
     unknown, kept apart). `kb.listing_level` says where each listing landed or why not.
   - `kb.spec_evidence` holds candidates per entity/field/source; listing evidence is recomputed
