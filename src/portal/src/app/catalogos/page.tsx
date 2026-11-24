@@ -53,7 +53,9 @@ async function Catalogs() {
   const user = await userWithRole("lector");
   if (!user) return <NoAccess needed="lector" />;
   const editor = hasRole(user.role, "editor");
-  const [tables, actions] = await Promise.all([catalogTables(), recentActionsFor([{ table: "segment" }, { table: "headlight_type" }, { table: "brake_type" }, { table: "fuel_type" }, { table: "transmission_type" }, { table: "drivetrain" }, { table: "body_style" }, { table: "exclusion_reason" }, { table: "vehicle_class" }, { table: "country" }])]);
+  // Requests first, then the data they change (see recentActionsFor).
+  const actions = await recentActionsFor([{ table: "segment" }, { table: "headlight_type" }, { table: "brake_type" }, { table: "fuel_type" }, { table: "transmission_type" }, { table: "drivetrain" }, { table: "body_style" }, { table: "exclusion_reason" }, { table: "vehicle_class" }, { table: "country" }]);
+  const tables = await catalogTables();
   return (
     <div className="space-y-6">
       <RecentActions actions={actions} />

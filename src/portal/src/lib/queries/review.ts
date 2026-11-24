@@ -69,8 +69,8 @@ export async function getCase(id: string) {
   await io();
   if (!/^\d+$/.test(id)) return null;
   const db = getDb();
-  const item = await db.selectFrom("kb.review_case").selectAll().where("id", "=", id).executeTakeFirst();
-  if (!item) return null;
+  // Requests first, then the case (see recentActionsFor): a request read as applied means its
+  // decision is already committed, so the case read next can't show it pending.
   const requests = await db
     .selectFrom("kb.web_action")
     .select(["id", "status", "error", "requested_by", "requested_at", "applied_at", "payload"])
@@ -79,6 +79,8 @@ export async function getCase(id: string) {
     .orderBy("id", "desc")
     .limit(10)
     .execute();
+  const item = await db.selectFrom("kb.review_case").selectAll().where("id", "=", id).executeTakeFirst();
+  if (!item) return null;
   return { item, requests };
 }
 

@@ -46,6 +46,8 @@ PYTHONPATH=src python -m vehicle_scraper kb worker [--once] [--poll 30]   # appl
 cd src/portal && pnpm install && pnpm dev                 # http://127.0.0.1:3000
 cd src/portal && pnpm lint && pnpm typecheck && pnpm test # ESLint, tsc, Vitest (no database)
 cd src/portal && pnpm db:types                            # regenerate src/generated/db.d.ts after a migration
+# portal end to end (Playwright, ~1 min after the build): needs the omnibase-test container on 55441
+cd src/portal && pnpm test:e2e                            # builds, starts in IAP mode, runs the real kb worker
 PYTHONPATH=src python -m vehicle_scraper kb status
 # re-extract only some listings after a parser fix (one id per line; ask before running)
 PYTHONPATH=src python -m vehicle_scraper run --site driveway --ids-file data/reextract/ids.txt
@@ -254,10 +256,25 @@ So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
   `/usuarios` (editors only), `/acciones` (history). Every write is a server action in
   `lib/actions/request.ts` (Zod in `schemas.ts`, role checked) that only INSERTs into
   `kb.web_action`; editors get inline `FieldEditor`s on the sheets (published values become
-  manual evidence) and each entity page lists its `RecentActions`, refreshing while queued. The portal repeats a few Python tables (`lib/issues.ts` = review.ISSUES,
+  manual evidence) and each entity page lists its `RecentActions`, refreshing while queued.
+  **Read a page's requests before the data they change**, never in parallel (`recentActionsFor`
+  explains why: the worker commits a change and its `applied` status together, so the other
+  order shows "Aplicada" next to the old value and the page stops refreshing). The portal repeats a few Python tables (`lib/issues.ts` = review.ISSUES,
   `lib/auth/roles.ts` = worker roles, `lib/fields.ts` labels and SOURCE_RANK):
   `tests/test_portal_sync.py` fails when they drift. After a migration: re-run
   `docs/sql/portal_role.sql` and `pnpm db:types`.
+- Portal end-to-end tests (`src/portal/e2e`, `playwright.config.ts`, `pnpm test:e2e`): the
+  production build (`next build` + `next start`, port 3100) in IAP mode, with a key pair made
+  in the config (its public half is `PORTAL_IAP_JWKS`, `e2e/fixtures.ts` signs a token per
+  test; `test.use({ as: "editor" })`). `tests/e2e_portal.py` recreates database `omnibase_e2e`
+  in the throwaway container (refuses 5435/5436 and omnibase), migrates with
+  `KB_FIRST_EDITOR_EMAIL` empty, seeds Creta/Sportage/Zoe, the users `lector|revisor|editor@e2e.test`
+  and the portal role `omnibase_portal_e2e` (via `portal_role.sql`), then runs the real worker;
+  Playwright waits for its READY line (web servers start before globalSetup). Tests run in
+  order on shared data (one worker). Windows uses the installed Edge (`channel: msedge`).
+  Next keeps the previous page of a route mounted but hidden after a client navigation, so
+  locate test ids with `.filter({ visible: true })`, and assert end states (the worker often
+  applies a request before the first refresh, so "Enviado" may never show).
 
 ## Current site status (see README.md for the up-to-date table)
 

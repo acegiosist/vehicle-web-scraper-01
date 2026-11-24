@@ -28,4 +28,13 @@ raíz del repo) las valida y aplica.
 ## Comandos
 
 - `pnpm lint`, `pnpm typecheck`, `pnpm test` (Vitest, sin base de datos)
+- `pnpm test:e2e`: pruebas de punta a punta con Playwright (build de producción en modo IAP y el
+  worker real). Necesita el contenedor desechable de pruebas en el puerto 55441:
+
+  ```
+  docker run -d --name omnibase-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=omnibase_test -p 55441:5432 postgres:16-alpine
+  ```
+
+  `tests/e2e_portal.py` (en la raíz del repositorio) recrea ahí la base `omnibase_e2e` en cada
+  corrida; nunca toca omnibase.
 - `pnpm db:types`: regenera `src/generated/db.d.ts` después de una migración.

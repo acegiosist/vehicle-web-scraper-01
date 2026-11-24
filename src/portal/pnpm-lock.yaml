@@ -15,7 +15,7 @@ importers:
         specifier: 0.5.2
         version: 0.5.2
       jose:
-        specifier: ^6.2.18
+        specifier: 6.2.18
         version: 6.2.18
       kysely:
         specifier: 0.29.9

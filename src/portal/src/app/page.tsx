@@ -31,7 +31,9 @@ export default function StatusPage() {
 async function Status() {
   const user = await userWithRole("lector");
   if (!user) return <NoAccess needed="lector" />;
-  const [t, recalc] = await Promise.all([totals(), pendingRecalc()]);
+  // The recalculation's status first, then the totals it changes (see recentActionsFor).
+  const recalc = await pendingRecalc();
+  const t = await totals();
   const tiles: [string, number, string][] = [
     ["Anuncios", t.listings, "versión vigente en staging"],
     ["Dentro del alcance", t.in_scope, "autos y motos, 1990 en adelante"],

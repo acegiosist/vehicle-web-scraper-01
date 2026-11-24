@@ -37,11 +37,9 @@ async function GenerationView({ params }: PageProps<"/base/generacion/[id]">) {
   if (!user) return <NoAccess needed="lector" />;
   const { id } = await params;
   const n = Number(id);
-  const [found, catalogs, actions] = await Promise.all([
-    generation(id),
-    getCatalogs(),
-    recentActionsFor([{ entity_type: "generation", entity_id: n }, { generation_id: n }, { source_id: n }, { target_id: n }]),
-  ]);
+  // Requests first, then the data they change (see recentActionsFor).
+  const actions = await recentActionsFor([{ entity_type: "generation", entity_id: n }, { generation_id: n }, { source_id: n }, { target_id: n }]);
+  const [found, catalogs] = await Promise.all([generation(id), getCatalogs()]);
   if (!found) notFound();
   const editor = hasRole(user.role, "editor");
   const target = { entityType: "generation" as const, entityId: id };
@@ -61,7 +59,7 @@ async function GenerationView({ params }: PageProps<"/base/generacion/[id]">) {
           <span>{formatYears(g.year_from, g.year_to, g.observed_year_from, g.observed_year_to)}</span>
           <Badge variant="outline">{formatValue("body_style_code", g.body_style_code, catalogs)}</Badge>
           <Badge variant={g.status === "verified" ? "secondary" : "outline"}>{g.status}</Badge>
-          <span>{formatInt(g.listings)} anuncios</span>
+          <span data-testid="generation-listings">{formatInt(g.listings)} anuncios</span>
         </div>
         {siblings.length > 0 && (
           <p className="text-sm text-muted-foreground">

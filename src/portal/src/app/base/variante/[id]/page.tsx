@@ -35,11 +35,9 @@ async function VariantView({ params }: PageProps<"/base/variante/[id]">) {
   const user = await userWithRole("lector");
   if (!user) return <NoAccess needed="lector" />;
   const { id } = await params;
-  const [found, catalogs, actions] = await Promise.all([
-    variant(id),
-    getCatalogs(),
-    recentActionsFor([{ entity_type: "variant", entity_id: Number(id) }, { variant_id: Number(id) }]),
-  ]);
+  // Requests first, then the data they change (see recentActionsFor).
+  const actions = await recentActionsFor([{ entity_type: "variant", entity_id: Number(id) }, { variant_id: Number(id) }]);
+  const [found, catalogs] = await Promise.all([variant(id), getCatalogs()]);
   if (!found) notFound();
   const editor = hasRole(user.role, "editor");
   const { v, evidence, notes, listings } = found;

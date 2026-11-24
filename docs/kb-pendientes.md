@@ -1,6 +1,6 @@
 # Base de conocimiento: pendientes
 
-Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración `0006_three_levels`).
+Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración `0009_review_case_view`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -50,5 +50,11 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
         Base (marca, generación con cortar/unir, tren motriz, variante con notas de evolución),
         edición de valores en las fichas, Catálogos, Usuarios (solo editores) y Acciones.
         Migración `0009_review_case_view` aplicada en `omnibase`.
-  - [ ] Etapa 4, pruebas de punta a punta con el worker real.
+  - [x] Etapa 4, pruebas de punta a punta (2026-11-24): `pnpm test:e2e` con Playwright sobre
+        el build de producción en modo IAP, el rol de base de datos del portal y el worker real
+        (`tests/e2e_portal.py` prepara una base desechable). Cubren: sin token (401), tokens
+        falsos o de otra llave, lector sin formularios, revisor que decide un caso, editor que
+        edita un valor (bueno y malo), corta una generación, recalcula y ve los anuncios
+        moverse, y da acceso a un usuario. Encontraron y se corrigió una carrera: las páginas
+        leían los datos y sus acciones en paralelo y podían mostrar "Aplicada" con el valor viejo.
   - [ ] Despliegue en GCP (Cloud Run, IAP, base): paso aparte.

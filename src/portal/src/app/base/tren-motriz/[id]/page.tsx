@@ -33,11 +33,9 @@ async function PowertrainView({ params }: PageProps<"/base/tren-motriz/[id]">) {
   const user = await userWithRole("lector");
   if (!user) return <NoAccess needed="lector" />;
   const { id } = await params;
-  const [found, catalogs, actions] = await Promise.all([
-    powertrain(id),
-    getCatalogs(),
-    recentActionsFor([{ entity_type: "powertrain", entity_id: Number(id) }]),
-  ]);
+  // Requests first, then the data they change (see recentActionsFor).
+  const actions = await recentActionsFor([{ entity_type: "powertrain", entity_id: Number(id) }]);
+  const [found, catalogs] = await Promise.all([powertrain(id), getCatalogs()]);
   if (!found) notFound();
   const { p, evidence } = found;
   const editor = hasRole(user.role, "editor");

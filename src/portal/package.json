@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:types": "kysely-codegen --dialect postgres --env-file .env.local --url \"env(PORTAL_DATABASE_URL)\" --numeric-parser number --include-pattern \"{kb.*,staging.*}\" --out-file src/generated/db.d.ts"
+    "db:types": "kysely-codegen --dialect postgres --env-file .env.local --url \"env(PORTAL_DATABASE_URL)\" --numeric-parser number --include-pattern \"{kb.*,staging.*}\" --out-file src/generated/db.d.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",

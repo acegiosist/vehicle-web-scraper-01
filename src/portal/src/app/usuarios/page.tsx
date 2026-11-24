@@ -53,7 +53,9 @@ function RoleSelect({ defaultValue }: { defaultValue?: string }) {
 async function Users() {
   // Who has access is itself sensitive: only editors see and change it.
   if (!(await userWithRole("editor"))) return <NoAccess needed="editor" />;
-  const [rows, actions] = await Promise.all([users(), recentActionsFor([{ role: "lector" }, { role: "revisor" }, { role: "editor" }])]);
+  // Requests first, then the data they change (see recentActionsFor).
+  const actions = await recentActionsFor([{ role: "lector" }, { role: "revisor" }, { role: "editor" }]);
+  const rows = await users();
   return (
     <div className="space-y-6">
       <RecentActions actions={actions.filter((a) => a.kind === "user_upsert")} />

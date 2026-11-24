@@ -9,7 +9,14 @@ export const ACTIONS_PAGE_SIZE = 50;
 
 const COLUMNS = ["id", "kind", "payload", "status", "error", "requested_by", "requested_at", "applied_at"] as const;
 
-/** Requests whose payload contains any of these objects (jsonb @>), newest first. */
+/**
+ * Requests whose payload contains any of these objects (jsonb @>), newest first.
+ *
+ * Read them BEFORE the data they change, not in parallel: the worker commits a change and marks
+ * its request applied in one transaction, so a request read as applied guarantees the data read
+ * afterwards includes it, and one read as queued keeps the page refreshing (RefreshWhile).
+ * The other order can show "Aplicada" next to the old value, and the page then stops refreshing.
+ */
 export async function recentActionsFor(matches: Record<string, unknown>[], limit = 10) {
   await io();
   if (!matches.length) return [];
