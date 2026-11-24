@@ -44,6 +44,32 @@ def test_features_english_equipment_lists():
     assert match_features("Power Steering") == set()
     assert match_features("Power Windows") == set()
     assert match_features("Power Liftgate") == set()
+    assert match_features("Aerial View Display System") == {"camera_360"}
+    assert match_features("Luggage Rack") == {"roof_rails"}
+    assert match_features("Front Collision Mitigation") == {"automatic_emergency_braking"}
+    assert match_features("Front Collision Warning") == set()          # a warning doesn't brake
+    assert match_features("Tow Hitch") == {"tow_package"}
+    assert match_features("Tow Hooks") == set()                        # recovery hooks, not towing gear
+    # Too vague to tell which phone system / how many airbags: left null
+    assert match_features("Smart Device Integration") == set()
+    assert match_features("Rear Head Air Bag") == set()
+
+
+def test_zero_cylinders_on_ev_is_silent():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pairs([("Engine", "0 Cyl"), ("Fuel Type", "Electric")])
+    r = b.build()
+    assert (r.engine_cylinders, r.fuel_type, r.parse_warnings) == (None, "EV", [])
+    b = RecordBuilder("t", "u", "2")
+    b.add_pairs([("Engine", "0 Cyl"), ("Fuel Type", "Gas")])
+    assert b.build().parse_warnings == ["could not parse engine_cylinders from '0 Cyl'"]
+
+
+def test_chassis_cab_is_a_truck():
+    b = RecordBuilder("t", "u", "1")
+    b.add_pair("Body", "Chassis")
+    r = b.build()
+    assert (r.body_style, r.vehicle_type, r.parse_warnings) == ("Truck", "Truck", [])
 
 
 def test_features():
