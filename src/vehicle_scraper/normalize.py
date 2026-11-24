@@ -310,7 +310,7 @@ _BODY = [
     (r"sedan|berlina|4 ?p(uertas)?\b", "Sedan"),
     (r"coupe|cupe", "Coupe"),
     (r"convertible|cabrio|roadster|descapotable", "Convertible"),
-    (r"camion|truck", "Truck"),
+    (r"camion|truck|\bchass?is\b", "Truck"),     # "Chassis": a chassis cab, a truck without a bed
     # Last, so "camion de carga" stays Truck: carroya's bare "Carga"/"Pasajeros".
     (r"\bcarga\b|\bpasajeros\b", "Van"),
 ]

@@ -122,6 +122,14 @@ def test_max_age_filters_on_listing_date(dated):
     assert "b" not in _DatedScraper.fetched            # known-old at discovery: never fetched
 
 
+def test_listing_date_is_stored(dated):
+    cli.run_site("dated", dated, limit=None, refresh=False)
+    got = {r["listing_id"]: r["listed_at"] for r in dated.rows()}
+    assert got["a"] == _ago(10).isoformat()            # known at discovery
+    assert got["p"] == _ago(3000).isoformat()          # found by parse() on the page
+    assert got["n"] is None
+
+
 def test_max_age_cutoff_is_passed_to_the_scraper(dated, monkeypatch):
     seen = []
     orig = _DatedScraper.discover

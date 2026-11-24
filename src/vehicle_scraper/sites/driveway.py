@@ -221,7 +221,7 @@ class DrivewayScraper(SiteScraper):
                      ("Engine", detail.get("engine")), ("Fuel Type", detail.get("fuel") or car.get("fuel")),
                      ("Transmission", detail.get("transmission")), ("Drive Type", detail.get("driveType"))])
         mpg = car.get("mpg") or {}
-        if mpg.get("combined"):
+        if mpg.get("combined") and b.values.get("fuel_type") != "EV":   # an EV's figure is MPGe
             b.set("fuel_economy_kml", mpg["combined"], "mpg")
         for group in detail.get("categoryFeatures") or []:
             b.add_feature_list(group.get("features") or [])

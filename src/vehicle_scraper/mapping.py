@@ -66,13 +66,15 @@ FEATURE_PATTERNS: dict[str, list[str]] = {
     "traction_control": [r"control de traccion", r"\btcs\b", r"\basr\b", r"traction control"],
     "adaptive_cruise_control": [r"crucero adaptativo", r"control de crucero adaptativo", r"adaptive cruise", r"\bacc\b"],
     "lane_assist": [r"carril", r"lane (keep|assist|depart)", r"\blka\b", r"\blkas\b"],
-    "automatic_emergency_braking": [r"frenado (autonomo|automatico|de emergencia)", r"\baeb\b", r"emergency brak", r"pre-?colision", r"pre-?collision"],
+    "automatic_emergency_braking": [r"frenado (autonomo|automatico|de emergencia)", r"\baeb\b", r"emergency brak", r"pre-?colision", r"pre-?collision",
+                                    r"(front|forward) collision mitigation"],   # "warning" alone doesn't brake
     "blind_spot_monitoring": [r"punto ciego", r"angulo muerto", r"blind ?spot", r"\bbsm\b", r"\bblis\b"],
     "led_lights": [r"\bled\b", r"\bleds\b"],
     "fog_lights": [r"exploradoras", r"antiniebla", r"neblinero", r"fog ?(light|lamp)", r"faros? de niebla"],
     "panoramic_roof": [r"panoramic"],
     "sunroof": [r"sunroof", r"quemacocos", r"techo solar", r"techo corredizo", r"moonroof", r"techo electrico", r"panoramic"],
-    "roof_rails": [r"barras? (de techo|portaequipaje)", r"rieles? de techo", r"roof ?(rails?|rack)", r"barras? longitudinales", r"portaequipajes de techo"],
+    "roof_rails": [r"barras? (de techo|portaequipaje)", r"rieles? de techo", r"roof ?(rails?|rack)", r"barras? longitudinales", r"portaequipajes de techo",
+                   r"luggage rack"],
     "alloy_wheels": [r"(rines|rin|llantas|aros|ruedas) de (aleacion|aluminio|magnesio)", r"alloy", r"alumin(um|ium) wheels?",
                      r"material (de )?(los )?(rines|rin|llantas|aros|ruedas) (aleacion|aluminio|magnesio)"],
     "leather_seats": [r"cuero", r"leather", r"\bpiel\b", r"cojineria en cuero", r"tapiceria en cuero"],
@@ -90,14 +92,14 @@ FEATURE_PATTERNS: dict[str, list[str]] = {
     "apple_carplay": [r"carplay", r"car play"],
     "android_auto": [r"android ?auto"],
     "navigation": [r"navegador", r"navegacion", r"\bgps\b", r"navigation"],
-    "camera_360": [r"360"],
+    "camera_360": [r"360", r"aerial view", r"surround[- ]view", r"bird'?s[- ]eye view"],
     "front_camera": [r"camara (frontal|delantera)", r"front camera"],
     "reverse_camera": [r"camara (de )?(reversa|retroceso|trasera|posterior|parqueo|estacionamiento)", r"rear(view)? camera", r"back[- ]?up camera", r"reverse camera", r"camara de retro"],
     "parking_sensors": [r"sensor(es)? de (parqueo|estacionamiento|reversa|retroceso|proximidad)", r"parking sensors?", r"park(ing)? aid", r"park distance", r"sensores? (delanteros|traseros)"],
     "automatic_parking": [r"(parqueo|estacionamiento|aparcamiento) (automatico|asistido)", r"park ?assist", r"auto ?park", r"automatic parking", r"self[- ]park"],
     "alarm": [r"alarma", r"\balarm\b", r"security system", r"anti[- ]?theft (system|alarm)"],
     "immobilizer": [r"inmoviliz", r"immobili"],
-    "tow_package": [r"\btiro\b", r"enganche", r"gancho de remolque", r"\btow", r"bola de remolque", r"kit de arrastre", r"tiron"],
+    "tow_package": [r"\btiro\b", r"enganche", r"gancho de remolque", r"\btow(?!\s*hooks?\b)", r"bola de remolque", r"kit de arrastre", r"tiron"],
     "bed_liner": [r"bed ?liner", r"protector de (platon|batea|caja)", r"forro de (platon|batea)", r"cubre ?(platon|batea)", r"liner"],
 }
 _FEATURE_RES = {f: [re.compile(p) for p in ps] for f, ps in FEATURE_PATTERNS.items()}
@@ -126,7 +128,7 @@ def match_features(text: str) -> set[str]:
                 found.add(field)
                 break
     # A panoramic roof is a sunroof, but a plain 360 mention must be a camera.
-    if "camera_360" in found and not re.search(r"camara|camera|vision|vista", t):
+    if "camera_360" in found and not re.search(r"camara|camera|vision|vista|view", t):
         found.discard("camera_360")
     if "memory_seats" in found and not re.search(r"asiento|silla|butaca|seat|conductor", t):
         found.discard("memory_seats")
@@ -219,6 +221,7 @@ class RecordBuilder:
         self.warnings: list[str] = []
         self.unmapped: dict[str, str] = {}
         self.displacement_misses: list[str] = []   # unparsed displacements; build() warns unless EV
+        self.zero_cylinders: list[str] = []        # "0 Cyl" values; build() warns unless EV
         self.body_fallback: Optional[str] = None   # vague body ("Deportivo"), used only if nothing else
 
     # -- primitives ---------------------------------------------------------
@@ -231,6 +234,8 @@ class RecordBuilder:
         if value is None:
             if field == "engine_displacement_l":
                 self.displacement_misses.append(N.clean(raw) or "")
+            elif field == "engine_cylinders" and N.parse_number(raw) == 0:
+                self.zero_cylinders.append(N.clean(raw) or "")   # "0 Cyl": an EV, see build()
             elif field in ("body_style", "vehicle_type") and N.body_fallback(raw):
                 self.body_fallback = self.body_fallback or N.body_fallback(raw)   # applied in build()
             elif field not in BOOLEAN_FIELDS:
@@ -362,4 +367,6 @@ class RecordBuilder:
                 if N.parse_number(raw) == 0 and "engine_displacement_l" in data:
                     continue                             # a "0.0l" placeholder, but the size is known
                 self.warn(f"could not parse engine_displacement_l from '{raw}'")
+            for raw in self.zero_cylinders:
+                self.warn(f"could not parse engine_cylinders from '{raw}'")
         return VehicleRecord(**self.meta, **data, parse_warnings=self.warnings)

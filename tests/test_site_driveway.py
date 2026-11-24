@@ -59,6 +59,7 @@ EXPECTED = {   # search result + driveway_detail.json (overview and every equipm
     'bluetooth': True,
     'navigation': True,
     'reverse_camera': True,
+    'camera_360': True,                     # "Aerial View Display System"
     'parking_sensors': True,
     'automatic_parking': True,
     'alarm': True,
@@ -90,6 +91,7 @@ class FakeApi:
         self.cars, self.window, self.bodies, self.details = cars, window, [], []
         self.known = set(known if known is not None else ["88551660"]) | {c["vehicleId"] for c in cars}
         self.max_batch = max_batch                      # bigger detail batches answer 502
+        self.detail = DETAIL
         self.session = type("S", (), {"headers": {}})()
         self.robots_exempt: set[str] = set()
 
@@ -101,7 +103,7 @@ class FakeApi:
                 raise HTTPError(f"HTTP 502 for {url}")
             data, errors = {}, []
             for i, vid in enumerate(ids):
-                data[f"c{i}"] = DETAIL if vid in self.known else None
+                data[f"c{i}"] = self.detail if vid in self.known else None
                 if vid not in self.known:
                     errors.append({"message": f"Could not find vehicle with vehicleId: {vid}", "path": [f"c{i}"]})
             return Response(url, 200, json_dumps({"data": data, **({"errors": errors} if errors else {})}), {})
@@ -209,6 +211,15 @@ def test_parse_search_result_plus_graphql_details(cfg):
     rec = _scraper(cfg, api).parse(_listing(CAR))
     assert api.details == [["88551660"]]
     assert _fields(rec) == EXPECTED
+    assert rec.parse_warnings == []
+
+
+def test_ev_mpge_is_not_fuel_economy(cfg):
+    api = FakeApi([])
+    api.detail = {**DETAIL, "engine": "0 Cyl", "fuel": "Electric", "mpg": {"city": 132, "highway": 98}}
+    rec = _scraper(cfg, api).parse(_listing({**CAR, "fuel": "Electric",
+                                             "mpg": {"city": 132, "combined": 115, "highway": 98}}))
+    assert (rec.fuel_type, rec.fuel_economy_kml, rec.engine_cylinders) == ("EV", None, None)
     assert rec.parse_warnings == []
 
 
