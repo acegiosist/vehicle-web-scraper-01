@@ -223,6 +223,16 @@ So far (migrations `0001_catalogs_staging` … `0010_powertrain_rejected`):
     listings > ai), so change a value by adding evidence, never by editing the column.
   - Year-consistent equipment flips open `evolution_note`; an approved one becomes a
     `kb.evolution_note` (field, value, year_from).
+  - Last step: `kb.final_listing` (migration 0011, `kb/final.py`), each in-scope listing's
+    final record, same column names as the schema plus level-only columns (segment,
+    dimensions, engine code, torque, gears) and price/mileage/link. `final.SOURCES` lists each
+    column's sources, the base first: a level's published value wins, the listing's own value
+    only fills gaps. Unassigned listings keep what they inherit (their generation) and
+    `unassigned_reason`; excluded ones have no row. Evolution notes apply from their year on
+    (latest not after the listing's year; before it, the variant's value). Wide types and no
+    FKs but the cascade from `clean_listing` (15 checks per row made it 3x slower: ~5 s for
+    98k rows); it empties on `kb clean` like `listing_level`. A new schema field fails
+    `tests/test_kb_final.py` until a migration adds its column and `SOURCES` its source.
 - `kb review export/import` (`kb/review.py`, multi-sheet writer and reader in `xlsx.py`): an
   .xlsx with a "Casos" sheet (drop-downs for decisión and clase) and an "Instrucciones" sheet
   (`review.ISSUES` says what aprobar/rechazar/corregir mean per issue; keep it in sync with

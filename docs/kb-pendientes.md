@@ -29,8 +29,8 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 - [ ] **Anuncios sin asignar**: 3.317 sin carrocería en modelos con varias carrocerías y 3.421
       con tren motriz ambiguo. Se reducen cuando se corten las generaciones y se completen
       cilindraje y tracción.
-- [ ] **Aplicar las notas de evolución a la ficha de cada anuncio según su año**: va con la
-      exportación de la ficha final.
+- [x] **Aplicar las notas de evolución a la ficha de cada anuncio según su año** (2026-11-24):
+      en `kb.final_listing`, desde el año de la nota; antes, el valor de la variante.
 
 - [x] **Rechazar un tren motriz rompía el recálculo** (2026-11-24): corregido en `kb build`; sus
       anuncios quedan sin asignar (`powertrain_rejected`). Migración `0010_powertrain_rejected`
@@ -42,7 +42,17 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 
 - [ ] Reglas de mantenimiento automáticas al reimportar (años nuevos, cambios de equipamiento,
       cierre de generación).
-- [ ] Exportación de la ficha final (lo que cada anuncio hereda de los tres niveles).
+- [x] Ficha final (2026-11-24): tabla `kb.final_listing` (migración `0011_final_listing`) que
+      `kb build` llena en cada recálculo, una fila por anuncio en alcance: gana la base, el
+      anuncio solo llena huecos, los sin asignar llevan lo que heredan y su motivo. Probada con
+      una copia de omnibase en el contenedor desechable (98.198 fichas, ~5 s).
+  - [ ] Aplicar `0011_final_listing` en omnibase (con visto bueno) y volver a correr
+        `docs/sql/portal_role.sql` (tabla nueva para el portal).
+  - [ ] Mostrarla en el portal o exportarla a archivo, si hace falta.
+- [ ] **Prueba de punta a punta intermitente** (Recalcular en `/`): unas 3 de 12 corridas la
+      respuesta de la server action no termina en el navegador ("Enviando…" se queda) aunque el
+      worker aplica el recálculo. Existía antes de la ficha final; no es un bloqueo de la base
+      ni un clic antes de hidratar (10 de 10 bien). Falta encontrar la causa.
 - [ ] Portal web para revisar y corregir (`src/portal`, Next.js + TypeScript, identidad con IAP,
       roles lector / revisor / editor):
   - [x] Etapa 1, base y worker (2026-11-24): migración `0007_portal` (usuarios con rol y bandeja

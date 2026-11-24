@@ -20,6 +20,8 @@ Run after ``kb clean``. In one transaction under the writer lock:
    listings > ai). Columns are derived: change a value through evidence, not by hand.
 7. **Proposals** for a person: ``generation_split`` (the engine changes between years) and
    ``evolution_note`` (an equipment field flips from a year on).
+8. **Final records** (``kb/final.py``): ``kb.final_listing``, what each in-scope listing
+   inherits from the three levels (the base wins; the listing fills gaps), evolution notes by year.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from typing import Optional
 
 from .clean import Cases, write_cases
 from .db import take_writer_lock
+from .final import write_final
 from .identity import compact_key
 from .levels import (BOOLEAN, EQUIP_MIN_AGREEMENT, EQUIP_MIN_SUPPORT, EQUIPMENT_FIELDS, EVOLUTION_MIN_SUPPORT,
                      GENERATION_COLUMNS, GENERATION_FROM_LISTINGS, MECH_DISAGREEMENT, POWERTRAIN_COLUMNS,
@@ -474,8 +477,11 @@ SELECT entity_type, entity_id, field, source_kind, value FROM kb.spec_evidence W
                 copy.write_row((l.site, l.listing_id, l.generation, l.powertrain, l.variant,
                                 None if l.variant else l.reason))
         write_cases(cur, cases, BUILD_ISSUES)
+        # 8. final records: what each listing inherits, after everything above is published
+        final = write_final(cur)
 
         summary = _summary(cur, listings, published)
+        summary["final_listings"] = final
         cur.execute("INSERT INTO kb.build_run (summary) VALUES (%s) RETURNING id", (json.dumps(summary),))
         summary["run_id"] = cur.fetchone()[0]
     return summary

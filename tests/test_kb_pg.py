@@ -569,3 +569,47 @@ def test_first_editor_migration(conn, monkeypatch):
     conn.execute("UPDATE kb.app_user SET role = 'lector'")
     command.upgrade(cfg, "head")
     assert q(conn, "SELECT role FROM kb.app_user") == [("lector",)]            # existing: left as it is
+
+
+def final_row(conn, listing_id):
+    rows = q(conn, "SELECT horsepower_hp, sunroof, leather_seats, length_mm, wireless_charger, headlight_type, "
+                   "price, currency, mileage_km, make, model, generation_name, variant_id IS NOT NULL, "
+                   "unassigned_reason FROM kb.final_listing WHERE listing_id = %s", listing_id)
+    return rows[0] if rows else None
+
+
+def test_final_listing_inherits_the_levels(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121, sunroof=True) for i in range(4)]
+    recs += [creta("a4", 2017, 1.6, drivetrain="FWD", horsepower_hp=130, sunroof=False, leather_seats=True,
+                   price=50_000_000, currency="COP", mileage_km=40_000)]
+    recs += [creta(f"n{i}", 2018, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(2)]
+    recs += [creta(f"b{i}", 2017, 2.0, drivetrain="FWD") for i in range(3)]
+    recs += [creta("x1", 2017, None, drivetrain="FWD", horsepower_hp=150)]  # 1.6 or 2.0: unassigned
+    recs += [creta("old", 1980, 1.6, drivetrain="FWD")]                     # out of scope: excluded
+    recs += [creta("ny", None, 1.6, drivetrain="FWD")]                      # no year: excluded too
+    built(conn, tmp_path, recs)
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    vid = q(conn, "SELECT v.id FROM kb.commercial_variant v JOIN kb.powertrain p ON p.id = v.powertrain_id "
+                  "WHERE p.engine_displacement_l = 1.6")[0][0]
+    conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status) "
+                 "VALUES ('generation', %s, 'length_mm', 'manual', '4300', 'accepted')", (gid,))
+    for field, value, year in [("wireless_charger", "true", 2018), ("headlight_type_code", '"Halogen"', 2015),
+                               ("headlight_type_code", '"LED"', 2018)]:
+        conn.execute("INSERT INTO kb.evolution_note (variant_id, field, value, year_from, source) "
+                     "VALUES (%s, %s, %s, %s, 'manual')", (vid, field, value, year))
+    s = build(conn)
+    in_scope = q(conn, "SELECT count(*) FROM kb.clean_listing WHERE excluded_reason IS NULL")[0][0]
+    assert s["final_listings"]["rows"] == in_scope == 11 and final_row(conn, "old") is None and final_row(conn, "ny") is None
+    # The base wins (hp 121 and sunroof published from the majority); the listing fills gaps
+    # (leather seats: one listing isn't enough to publish), and always gives price and mileage.
+    assert final_row(conn, "a4") == (121, True, True, 4300, None, "Halogen", 50_000_000, "COP", 40_000,
+                                     "Hyundai", "Creta", "Creta (SUV)", True, None)
+    # Evolution notes from their year on; the latest one not after the listing's year wins.
+    assert final_row(conn, "n0")[:6] == (121, True, None, 4300, True, "LED")
+    # Unassigned: what it inherits (the generation) plus its own values, and why.
+    assert final_row(conn, "x1") == (150, None, None, 4300, None, None, None, None, None, "Hyundai", "Creta",
+                                     "Creta (SUV)", False, "ambiguous_powertrain")
+    # kb clean empties it (like listing_level); the next build fills it again.
+    clean(conn)
+    assert q(conn, "SELECT count(*) FROM kb.final_listing") == [(0,)]
+    assert build(conn)["final_listings"]["rows"] == 11
