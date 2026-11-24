@@ -290,3 +290,93 @@ def test_clean_keeps_unknown_make_case_open_on_rerun(conn, tmp_path):
     s = cleaned(conn, tmp_path, recs)                       # the make now has an alias
     assert s["review_pending"].get("unknown_make") == 1
     assert q(conn, "SELECT status FROM kb.review_item WHERE issue = 'unknown_make'") == [("pending",)]
+
+
+# --- kb review export / import --------------------------------------------------------------
+from vehicle_scraper.kb.review import export_review, import_review  # noqa: E402
+from vehicle_scraper.xlsx import Sheet, read_sheet, write_workbook  # noqa: E402
+
+
+def fill(path, decisions: dict):
+    """Write decisions into an exported review file, like a reviewer in Excel.
+    decisions: case id -> (decision, corrected value, class)."""
+    rows = read_sheet(path, "Casos")
+    header, body = rows[0], rows[1:]
+    i = {h: n for n, h in enumerate(header)}
+    for r in body:
+        r += [None] * (len(header) - len(r))
+        if r[i["id"]] in decisions:
+            d, v, c = decisions[r[i["id"]]]
+            r[i["decisión"]], r[i["valor corregido"]], r[i["clase"]] = d, v, c
+    write_workbook(path, [Sheet("Casos", header, body)])
+
+
+def case_id(conn, issue, **where):
+    extra = "".join(f" AND {k} = %s" for k in where)
+    return q(conn, f"SELECT id FROM kb.review_item WHERE issue = %s{extra}", issue, *where.values())[0][0]
+
+
+def test_review_round_trip(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
+    recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]
+    recs += [rec(listing_id="z1", make="Chana", model="Benni", trim=None),
+             rec(listing_id="z2", make="Zorgmobil", model="Z1", trim=None),
+             rec(listing_id="w1", make="Kia", model="Picanto Ion", trim="LX"),
+             rec(listing_id="k1", make="Toyota", model="Hilux", trim="2.8 4x4 Aut", drivetrain="2WD")]
+    recs += [rec(listing_id=f"p{i}", make="Kia", model="Picanto", trim="LX") for i in range(5)]
+    recs += [rec(listing_id=f"c{i}", make="Changan", model="Benni", trim=None) for i in range(5)]
+    built(conn, tmp_path, recs)
+    out = tmp_path / "review.xlsx"
+    s = export_review(conn, out)
+    assert s["cases"] == q(conn, "SELECT count(*) FROM kb.review_item WHERE status = 'pending'")[0][0]
+    assert read_sheet(out, "Instrucciones")[0][0] == "tipo"
+
+    chana = case_id(conn, "unknown_make", entity_key=str(q(conn, "SELECT id FROM kb.make WHERE name='Chana'")[0][0]))
+    zorg = case_id(conn, "unknown_make", entity_key=str(q(conn, "SELECT id FROM kb.make WHERE name='Zorgmobil'")[0][0]))
+    ion = case_id(conn, "weak_model", entity_key=str(q(conn, "SELECT id FROM kb.model WHERE name='Picanto Ion'")[0][0]))
+    hilux = case_id(conn, "field_conflict", entity_key="carroya:k1")
+    split = case_id(conn, "generation_split")
+    fill(out, {chana: ("corregir", "Changan", None),          # Chana = Changan
+               zorg: ("aprobar", None, None),                 # missing class -> error, stays pending
+               ion: ("corregir", "Picanto", None),            # merge into the existing model
+               hilux: ("aprobar", None, None),                # the name's 4WD wins
+               split: ("corregir", 2020, None)})              # cut a year earlier than proposed
+    r = import_review(conn, out, reviewer="Ana")
+    assert r["decided"] == {"corrected": 3, "approved": 1} and len(r["errors"]) == 1
+    assert "clase" in r["errors"][0]["error"]
+    assert q(conn, "SELECT status FROM kb.review_item WHERE id = %s", zorg) == [("pending",)]
+
+    # Effects, after the automatic clean + build:
+    assert q(conn, "SELECT k.name FROM kb.clean_listing l JOIN kb.make k ON k.id = l.make_id "
+                   "WHERE listing_id = 'z1'") == [("Changan",)]
+    assert q(conn, "SELECT m.name FROM kb.clean_listing l JOIN kb.model m ON m.id = l.model_id "
+                   "WHERE listing_id = 'w1'") == [("Picanto",)]
+    assert q(conn, "SELECT drivetrain_code, provenance->>'drivetrain' FROM kb.clean_listing "
+                   "WHERE listing_id = 'k1'") == [("4WD", "manual")]
+    assert q(conn, "SELECT year_from, year_to FROM kb.generation WHERE name LIKE 'Creta%%' ORDER BY id") == [
+        (2017, 2019), (2020, None)]
+    assert q(conn, "SELECT decided_by FROM kb.review_item WHERE id = %s", chana) == [("Ana",)]
+
+    # Importing the same file again changes nothing: decided cases are never overwritten.
+    again = import_review(conn, out, reviewer="Otro", rebuild=False)
+    assert again["decided"].get("already_decided") == 4 and "clean" not in again
+    assert q(conn, "SELECT decided_by FROM kb.review_item WHERE id = %s", chana) == [("Ana",)]
+
+
+def test_review_make_class_and_value_validation(conn, tmp_path):
+    recs = [rec(listing_id=f"m{i}", make="Kenbo", model="Rider", trim=None, vehicle_type="Motorcycle")
+            for i in range(5)]
+    recs += [rec(listing_id="e1", make="Toyota", model="Corolla", trim="1.8 Hybrid", fuel_type="Gasoline")]
+    recs += [rec(listing_id=f"c{i}", make="Toyota", model="Corolla", trim="XEi") for i in range(5)]
+    built(conn, tmp_path, recs)
+    out = tmp_path / "r.xlsx"
+    export_review(conn, out, issues=["unknown_make", "field_conflict"])
+    kenbo = case_id(conn, "unknown_make")
+    fuel = case_id(conn, "field_conflict", field="fuel_type")
+    fill(out, {kenbo: ("aprobar", None, "moto"), fuel: ("corregir", "Volador", None)})
+    r = import_review(conn, out, reviewer="Ana")
+    assert r["decided"] == {"approved": 1} and "catálogo" in r["errors"][0]["error"]
+    assert q(conn, "SELECT status, default_class FROM kb.make WHERE name = 'Kenbo'") == [("accepted", "motorcycle")]
+    fill(out, {fuel: ("corregir", "híbrido", None)})                 # Spanish catalog name works
+    import_review(conn, out, reviewer="Ana")
+    assert q(conn, "SELECT fuel_type_code FROM kb.clean_listing WHERE listing_id = 'e1'") == [("Hybrid",)]

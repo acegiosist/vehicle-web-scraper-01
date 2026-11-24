@@ -39,6 +39,17 @@ def add_parser(sub) -> None:
     ksub.add_parser("build", help="build generations, powertrains and commercial variants from the cleaned "
                                   "listings (run after clean)")
 
+    rv = ksub.add_parser("review", help="decide review cases in an Excel file")
+    rsub = rv.add_subparsers(dest="review_cmd", required=True)
+    re_ = rsub.add_parser("export", help="write the pending cases to a .xlsx")
+    re_.add_argument("--out", type=Path, default=Path("data/review.xlsx"))
+    re_.add_argument("--issue", action="append", default=None, help="only this kind of case (repeatable)")
+    re_.add_argument("--limit", type=int, default=None, help="at most this many cases")
+    ri = rsub.add_parser("import", help="read the decisions back, then re-run clean and build")
+    ri.add_argument("path", type=Path)
+    ri.add_argument("--reviewer", required=True, help="who decided (recorded on every case)")
+    ri.add_argument("--no-rebuild", action="store_true", help="only save the decisions (no clean + build)")
+
     ksub.add_parser("status", help="catalogs, sites, imported and cleaned listings, levels")
 
 
@@ -124,6 +135,36 @@ def cmd_build(url: str, args) -> int:
     return 0
 
 
+def cmd_review(url: str, args) -> int:
+    from .db import connect
+    from .review import export_review, import_review
+    with connect(url) as conn:
+        if args.review_cmd == "export":
+            try:
+                s = export_review(conn, args.out, issues=args.issue, limit=args.limit)
+            except PermissionError:
+                print(f"Can't write {args.out}: close it in Excel (or pass --out) and retry.", file=sys.stderr)
+                return 1
+            print(f"Wrote {s['cases']} pending cases to {s['file']}: "
+                  + (", ".join(f"{k}={v}" for k, v in s["by_issue"].items()) or "none"))
+            return 0
+        s = import_review(conn, args.path, args.reviewer, rebuild=not args.no_rebuild)
+    decided = s["decided"]
+    print(f"Read {s['file']}: approved={decided.get('approved', 0)} rejected={decided.get('rejected', 0)} "
+          f"corrected={decided.get('corrected', 0)} already decided={decided.get('already_decided', 0)} "
+          f"errors={len(s['errors'])}")
+    for e in s["errors"]:
+        print(f"  row {e['row']}" + (f" (case {e['id']})" if "id" in e else "") + f": {e['error']}")
+    if s["errors"]:
+        print("  Those cases stay pending: fix the rows and import the file again.")
+    if "clean" in s:
+        print_clean_summary(s["clean"])
+        print_build_summary(s["build"])
+    elif not args.no_rebuild:
+        print("Nothing was decided, so clean and build didn't run.")
+    return 0
+
+
 def cmd_status(url: str, args) -> int:
     from .db import connect
     with connect(url) as conn, conn.cursor() as cur:
@@ -183,4 +224,4 @@ def run(args: argparse.Namespace) -> int:
         print(e, file=sys.stderr)
         return 2
     return {"migrate": cmd_migrate, "import": cmd_import, "clean": cmd_clean, "build": cmd_build,
-            "status": cmd_status}[args.kb_cmd](url, args)
+            "review": cmd_review, "status": cmd_status}[args.kb_cmd](url, args)

@@ -18,9 +18,14 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 - [ ] **Asignar el segmento a cada generación**: la regla por largo propone (A < 3,7 m … F > 5,1 m),
       luego fuentes externas o Claude, y la corrección manual gana. Depende de tener las
       dimensiones.
-- [ ] **Resolver los casos de revisión**: 102 cortes de generación propuestos, 674 discrepancias
-      mecánicas y 2 notas de evolución, además de los de la fase 2. Hoy una decisión solo se
-      aplica si se escribe en `kb.review_item`; falta el CSV de ida y vuelta o el portal.
+- [x] **Herramienta para decidir los casos sin portal** (2026-11-24): `kb review export` escribe
+      un Excel con los casos pendientes y sus instrucciones; `kb review import ... --reviewer`
+      valida las decisiones, las guarda y recalcula (clean + build).
+- [ ] **Decidir los casos de revisión** (trabajo del equipo): 3.139 pendientes al 2026-11-24.
+      22 marcas desconocidas, 2 anuncios sin marca, 828 modelos con pocos anuncios, 11 modelos que son
+      solo mecánica, 102 cortes de generación, 674 discrepancias mecánicas, 2 notas de evolución,
+      1.442 conflictos entre campo y nombre, 56 valores imposibles. Empezar por marcas, modelos y
+      cortes de generación: son los que más anuncios destraban.
 - [ ] **Anuncios sin asignar**: 3.317 sin carrocería en modelos con varias carrocerías y 3.421
       con tren motriz ambiguo. Se reducen cuando se corten las generaciones y se completen
       cilindraje y tracción.

@@ -38,6 +38,8 @@ PYTHONPATH=src python -m vehicle_scraper kb migrate                     # or: al
 PYTHONPATH=src python -m vehicle_scraper kb import --sqlite data/vehicles.sqlite
 PYTHONPATH=src python -m vehicle_scraper kb clean                       # makes, models, trims, fields + review cases
 PYTHONPATH=src python -m vehicle_scraper kb build                       # generations, powertrains, variants (after clean)
+PYTHONPATH=src python -m vehicle_scraper kb review export --out data/review.xlsx [--issue weak_model] [--limit N]
+PYTHONPATH=src python -m vehicle_scraper kb review import data/review.xlsx --reviewer "Nombre"   # then clean + build
 PYTHONPATH=src python -m vehicle_scraper kb status
 # re-extract only some listings after a parser fix (one id per line; ask before running)
 PYTHONPATH=src python -m vehicle_scraper run --site driveway --ids-file data/reextract/ids.txt
@@ -200,6 +202,16 @@ So far (migrations `0001_catalogs_staging` … `0006_three_levels`):
     listings > ai), so change a value by adding evidence, never by editing the column.
   - Year-consistent equipment flips open `evolution_note`; an approved one becomes a
     `kb.evolution_note` (field, value, year_from).
+- `kb review export/import` (`kb/review.py`, multi-sheet writer and reader in `xlsx.py`): an
+  .xlsx with a "Casos" sheet (drop-downs for decisión and clase) and an "Instrucciones" sheet
+  (`review.ISSUES` says what aprobar/rechazar/corregir mean per issue; keep it in sync with
+  the effects). Import validates each row (`review.decide`): an unknown make needs a clase to
+  be approved, a correction must be an existing make / a catalog value (code or Spanish name) /
+  a number in range / a year; a bad row is reported and stays pending, the rest are saved; a
+  decided case is never overwritten. Then clean + build run in the same transaction
+  (`--no-rebuild` skips). Effects live where the rule lives: make/model decisions and
+  per-listing overrides in `clean._apply_decisions`/`_listing_overrides` (provenance
+  `manual`), splits, manual spec values and evolution notes in `build._apply_decisions`.
 
 ## Current site status (see README.md for the up-to-date table)
 

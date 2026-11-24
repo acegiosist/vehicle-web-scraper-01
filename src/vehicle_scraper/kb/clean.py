@@ -143,7 +143,10 @@ SELECT %s, id, 'seed' FROM kb.make WHERE slug = %s ON CONFLICT (alias_key) DO NO
 
 
 def _apply_decisions(cur) -> None:
-    """Decided make/model cases fix the status for good (source becomes 'manual')."""
+    """Decided make/model cases fix the row for good (source becomes 'manual', which the rules
+    never change). Approved make: accepted with the reviewer's class. Corrected make: merged
+    into an existing make (its aliases move). Corrected model: merged into the model of that
+    name in the same make, or renamed when there is none."""
     for table, issue in (("make", "unknown_make"), ("model", "weak_model")):
         cur.execute(f"""
 UPDATE kb.{table} t SET status = CASE r.status WHEN 'rejected' THEN 'rejected' ELSE 'accepted' END,
@@ -151,6 +154,62 @@ UPDATE kb.{table} t SET status = CASE r.status WHEN 'rejected' THEN 'rejected' E
 FROM kb.review_item r
 WHERE r.entity_type = %s AND r.issue = %s AND r.status IN ('approved', 'rejected')
   AND r.entity_key = t.id::text AND t.source <> 'manual'""", (table, issue))
+    cur.execute("""
+UPDATE kb.make t SET default_class = r.corrected_value->>'class'
+FROM kb.review_item r
+WHERE r.entity_type = 'make' AND r.issue = 'unknown_make' AND r.status = 'approved'
+  AND r.corrected_value ? 'class' AND r.entity_key = t.id::text
+  AND t.default_class IS DISTINCT FROM r.corrected_value->>'class'""")
+    for old, target in _load(cur, """
+SELECT r.entity_key::bigint, (r.corrected_value->>'merge')::bigint FROM kb.review_item r
+JOIN kb.make k ON k.id::text = r.entity_key
+WHERE r.entity_type = 'make' AND r.issue = 'unknown_make' AND r.status = 'corrected' AND k.status <> 'rejected'"""):
+        cur.execute("UPDATE kb.make_alias SET make_id = %s, source = 'manual' WHERE make_id = %s", (target, old))
+        cur.execute("UPDATE kb.make SET status = 'rejected', source = 'manual', updated_at = now() WHERE id = %s",
+                    (old,))
+    for old, make_id, name in _load(cur, """
+SELECT m.id, m.make_id, r.corrected_value->>'name' FROM kb.review_item r JOIN kb.model m ON m.id::text = r.entity_key
+WHERE r.entity_type = 'model' AND r.issue = 'weak_model' AND r.status = 'corrected'
+  AND m.merged_into IS NULL AND m.status <> 'rejected'"""):
+        key = compact_key(name)
+        cur.execute("SELECT model_id FROM kb.model_alias WHERE make_id = %s AND alias_key = %s AND model_id <> %s",
+                    (make_id, key, old))
+        row = cur.fetchone()
+        if row:                                   # an existing model: merge into it
+            target = row[0]
+            cur.execute("UPDATE kb.model_alias SET model_id = %s, source = 'manual' WHERE model_id = %s", (target, old))
+            cur.execute("UPDATE kb.model SET merged_into = %s, status = 'rejected', source = 'manual', "
+                        "updated_at = now() WHERE id = %s", (target, old))
+            cur.execute("UPDATE kb.model SET status = 'accepted', source = 'manual', updated_at = now() "
+                        "WHERE id = %s AND status <> 'accepted'", (target,))
+        else:                                     # a new name: rename (idempotent)
+            cur.execute("UPDATE kb.model SET name = %s, slug = %s, status = 'accepted', source = 'manual', "
+                        "updated_at = now() WHERE id = %s AND (name <> %s OR source <> 'manual')",
+                        (name, slugify(name), old, name))
+            cur.execute("INSERT INTO kb.model_alias (make_id, alias_key, model_id, source) VALUES (%s, %s, %s, "
+                        "'manual') ON CONFLICT (make_id, alias_key) DO UPDATE SET model_id = EXCLUDED.model_id, "
+                        "source = 'manual'", (make_id, key, old))
+
+
+DROP = object()     # a listing override that removes the field's value
+
+
+def _listing_overrides(cur) -> tuple[dict, dict, dict]:
+    """Decided listing cases: (make name by listing, model name by listing,
+    {(listing, field): value or DROP})."""
+    makes, models, fields_ = {}, {}, {}
+    for key, fname, issue, status, proposed, current, corrected in _load(cur, """
+SELECT entity_key, field, issue, status, proposed_value, current_value, corrected_value FROM kb.review_item
+WHERE entity_type = 'listing' AND status IN ('approved', 'rejected', 'corrected')"""):
+        if issue == "missing_make" and status == "corrected":
+            makes[key] = corrected["make"]
+        elif issue == "model_is_attributes" and status == "corrected":
+            models[key] = corrected["model"]
+        elif issue == "field_conflict":
+            fields_[(key, fname)] = {"approved": proposed, "rejected": current, "corrected": corrected}[status]
+        elif issue == "implausible_value" and status in ("rejected", "corrected"):
+            fields_[(key, fname)] = DROP if status == "rejected" else corrected
+    return makes, models, fields_
 
 
 def _load(cur, sql: str) -> list[tuple]:
@@ -167,6 +226,10 @@ def clean(conn, seed_path: Path = SEED_PATH, today: Optional[date] = None) -> di
         take_writer_lock(cur)
         _sync_seed(cur, seed)
         _apply_decisions(cur)
+        over_make, over_model, over_fields = _listing_overrides(cur)
+        over_by_listing: dict[str, dict] = defaultdict(dict)
+        for (key, f), v in over_fields.items():
+            over_by_listing[key][f] = v
         cases = Cases()
 
         listings = [_Listing(s, i, v, c, d) for s, i, v, c, d in _load(cur, """
@@ -224,10 +287,11 @@ SELECT id, name, default_class, status FROM kb.make""")}
         for l in listings:
             d = l.data
             raw_make = (d.get("make") or "").strip()
-            if raw_make:
-                l.make_id = make_alias[compact_key(raw_make)]
-            else:
+            if not raw_make:
                 cases.add("listing", l.key, "missing_make", evidence={"model": d.get("model"), "trim": d.get("trim")})
+            raw_make = over_make.get(l.key) or raw_make              # a reviewer's make wins
+            if raw_make:
+                l.make_id = make_alias.get(compact_key(raw_make))
             mclass = makes[l.make_id]["class"] if l.make_id else None
             vt = d.get("vehicle_type")
             moto = vt == "Motorcycle" or (not vt and mclass == "motorcycle")
@@ -246,9 +310,11 @@ SELECT id, name, default_class, status FROM kb.make""")}
                 l.excluded = "YearOutOfRange"
             elif int(year) < MIN_YEAR:
                 l.excluded = "Classic"
-            if l.excluded or not l.make_id:
-                continue
+            if l.excluded or not l.make_id or makes[l.make_id]["status"] == "rejected":
+                continue                                   # a rejected make never gets models
             l.model_name, l.model_attrs = split_tokens(d.get("model"), model=True, moto=moto)
+            if l.key in over_model:                        # a reviewer named the model
+                l.model_name, l.model_attrs = over_model[l.key], {}
             l.trim_label, l.trim_attrs = split_tokens(d.get("trim"), moto=moto)
             if not l.model_name:
                 cases.add("listing", l.key, "model_is_attributes", current=d.get("model"),
@@ -361,6 +427,12 @@ WHERE id = %s RETURNING status, name""", (n_listings, n_sites, strong, model_id)
                                             "engine_displacement_l": disp})
             else:
                 excluded[l.excluded] += 1
+            for f, v in over_by_listing.get(l.key, {}).items():   # reviewer decisions win
+                if v is DROP or v is None:
+                    values.pop(f, None)
+                    prov.pop(f, None)
+                elif f in COLUMNS:
+                    values[f], prov[f] = v, "manual"
             for f, (lo, hi) in BOUNDS.items():
                 v = values.get(f)
                 if v is not None and not lo <= float(v) <= hi:
