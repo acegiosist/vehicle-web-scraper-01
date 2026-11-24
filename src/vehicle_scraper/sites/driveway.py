@@ -186,7 +186,8 @@ class DrivewayScraper(SiteScraper):
     def _detail(self, vehicle_id: str) -> dict:
         if vehicle_id not in self._details:
             ids = [vehicle_id] + [l.listing_id for l in self._pending
-                                  if l.listing_id != vehicle_id and l.listing_id not in self._details]
+                                  if l.listing_id != vehicle_id and l.listing_id not in self._details
+                                  and (self.only_ids is None or l.listing_id in self.only_ids)]
             ids = ids[:self.detail_batch]
             try:
                 self._details.update(self._fetch_details(ids))

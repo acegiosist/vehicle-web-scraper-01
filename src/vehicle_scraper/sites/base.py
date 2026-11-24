@@ -58,6 +58,9 @@ class SiteScraper(ABC):
     # The run's --limit (None = whole site). Under --max-age discover() is called without a limit,
     # since run_site keeps going until `limit` listings pass the filter.
     run_limit: Optional[int] = None
+    # Set by `run --ids-file`: only these listing ids are parsed (re-extraction after a parser
+    # fix). A scraper that prefetches details in batches (Driveway) asks only for these.
+    only_ids: Optional[set[str]] = None
 
     def __init__(self, cfg: Settings = default_settings, client: Optional[PoliteClient] = None):
         self.cfg = cfg

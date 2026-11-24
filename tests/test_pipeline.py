@@ -185,3 +185,23 @@ def test_carroya_discover_reads_publication_date(cfg, tmp_path):
     got = list(CarroYaScraper(cfg, client=FakeClient({"find-filters": str(p)})).discover())
     assert [l.listed_at for l in got] == [to_datetime("2026-11-14T20:40:46Z"),
                                           to_datetime("2026-01-02"), None]
+
+
+def test_ids_file_reextracts_only_selected_listings(dated, tmp_path):
+    cli.run_site("dated", dated, limit=None, refresh=False)            # first full run
+    _DatedScraper.fetched.clear()
+    stats = cli.run_site("dated", dated, limit=1, refresh=False, only_ids={"c", "n", "gone"})
+    # Already stored, but selected: re-scraped anyway; nothing else is fetched; the limit is ignored.
+    assert _DatedScraper.fetched == ["c", "n"]
+    assert stats["saved"] == 2 and stats["missing"] == 1               # "gone" was never discovered
+
+
+def test_ids_file_stops_once_all_found(dated):
+    stats = cli.run_site("dated", dated, limit=None, refresh=False, only_ids={"a"})
+    assert _DatedScraper.fetched == ["a"] and stats["missing"] == 0
+
+
+def test_read_ids_file(tmp_path):
+    p = tmp_path / "ids.txt"
+    p.write_text("\ufeff# driveway pickups\n123\n\n 456  # F-150\n", encoding="utf-8")
+    assert cli.read_ids_file(p) == {"123", "456"}

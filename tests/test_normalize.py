@@ -138,6 +138,18 @@ def test_fuel_gas_and_mixed():
     assert N.to_fuel("Gasolina y GNV") is None          # bi-fuel
     assert N.to_fuel("Petrol + CNG") is None            # bi-fuel
     assert N.to_fuel("Gas") == "Gasoline"               # US English "gas"
+    assert N.to_fuel("Flex") == "Flex" and N.to_fuel("Flex Fuel") == "Flex"
+    assert N.to_fuel("Gasolina/Etanol") == "Flex" and N.to_fuel("E85") == "Flex"
+    assert N.to_fuel("Flex Hybrid") == "Hybrid"         # a hybrid first
+
+
+def test_us_cab_styles_are_pickups():
+    for cab in ("Crew Cab", "Extended Cab", "Regular Cab", "SuperCrew", "Super Cab", "Chassis Cab",
+                "Double Cab", "Quad Cab", "Cabina extendida"):
+        assert N.to_body(cab) == "Pickup", cab
+        assert N.body_from_title(f"Lariat {cab}") == "Pickup", cab
+    assert N.body_from_title("Cabriolet") == "Convertible"   # "cab" alone is not a cab style
+    assert N.to_body("Cab") is None
     assert N.to_fuel("Gasolina y eléctrico") == "Hybrid"
     assert N.to_fuel("Diesel - Eléctrico") == "Hybrid"
     assert N.to_fuel("Eléctrico") == "EV"

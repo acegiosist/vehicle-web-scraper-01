@@ -19,7 +19,7 @@ from .html_site import HtmlSiteScraper
 class Cars24Scraper(HtmlSiteScraper):
     name = 'cars24'
     base_url = 'https://www.cars24.com'
-    country = ''
+    country = 'IN'
     currency = None
     status = "unverified"
     notes = 'Scaffolded by new-site; review before marking verified'

@@ -82,6 +82,17 @@ def _carroya_variant(tmp_path, cylindrical, sheet_cc="2656", category=None, vers
     return s.parse(Listing("928d091b-9e37-4938-a3f3-a091dc538590", "x"))
 
 
+def test_carroya_box_zero_is_not_filled_in(tmp_path):
+    # "box": "0" means the seller left the gearbox blank: no value from it and no warning.
+    data = json.loads((FIXTURES / "carroya_detail.json").read_text(encoding="utf-8"))
+    data.get("data", data)["box"] = "0"
+    p = tmp_path / "carroya_box.json"
+    p.write_text(json.dumps(data), encoding="utf-8")
+    s = CarroYaScraper(Settings(data_dir=tmp_path, request_delay_s=0), client=FakeClient({"find-vehicle-detail": str(p)}))
+    rec = s.parse(Listing("928d091b-9e37-4938-a3f3-a091dc538590", "x"))
+    assert not [w for w in rec.parse_warnings if "transmission_type" in w]
+
+
 def _disp_warnings(rec):
     return [w for w in rec.parse_warnings if "engine_displacement_l" in w]
 

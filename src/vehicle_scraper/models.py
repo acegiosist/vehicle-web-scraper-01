@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 VehicleType = Literal["SUV", "Sedan", "Pickup", "Hatchback", "Coupe", "Van", "Convertible", "Wagon", "Truck", "Minivan",
                       "Motorcycle"]   # Motorcycle: vehicle_type only, set by a site's own category field
-FuelType = Literal["Gasoline", "Diesel", "Hybrid", "EV", "CNG"]   # CNG: compressed natural gas (GNV/GNC)
+FuelType = Literal["Gasoline", "Diesel", "Hybrid", "EV", "CNG", "Flex"]   # CNG: natural gas (GNV/GNC);
+                                                                           # Flex: gasoline/ethanol (E85)
 TransmissionType = Literal["Manual", "Automatic", "CVT", "DCT"]
 Drivetrain = Literal["FWD", "RWD", "AWD", "4WD", "2WD"]   # 2WD: "4x2", front/rear not stated
 

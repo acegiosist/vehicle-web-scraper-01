@@ -126,7 +126,8 @@ class CarroYaScraper(SiteScraper):
                 b.set("engine_displacement_l", litres)
             elif str(cyl).strip() not in ("0", "0.0"):    # 0 = not filled in
                 cyl_miss = str(cyl)
-        b.set("transmission_type", d.get("box"))
+        if str(d.get("box")).strip() not in ("0", "0.0"):    # 0 = not filled in, like "cylindrical"
+            b.set("transmission_type", d.get("box"))
         b.set("fuel_type", d.get("fuel"))
         b.set("mileage_km", d.get("kilometers"))
         b.set("price", d.get("price"))

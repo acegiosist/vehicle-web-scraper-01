@@ -285,6 +285,7 @@ _FUEL = [
     (r"hibrid|hybrid|\bhev\b|\bphev\b|\bmhev\b", "Hybrid"),
     (r"electric|\bev\b|\bbev\b", "EV"),
     (r"diesel|acpm|gasoil|gasoleo", "Diesel"),
+    (r"\bflex\b|flex ?fuel|\be85\b|etanol|ethanol", "Flex"),    # gasoline/ethanol, before Gasoline
     (r"gasolin|nafta|bencina|petrol|gasoline|\bgas\b", "Gasoline"),
 ]
 _TRANSMISSION = [
@@ -301,7 +302,10 @@ _DRIVETRAIN = [
     (r"4x2|\b2wd\b|2x4", "2WD"),        # last: "4x2 delantera" stays FWD
 ]
 _BODY = [
-    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble)|camioneta de platon|platon", "Pickup"),
+    # US cab styles ("Crew Cab", "SuperCrew", "Chassis Cab") only exist on pickups.
+    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble|extendida)|camioneta de platon|platon"
+     r"|\b(crew|extended|regular|double|quad|king|access|mega|super) ?cab\b|\bsupercrew\b|\bchassis ?cab\b",
+     "Pickup"),     # (same cab list as _PICKUP_CAB below)
     (r"minivan|monovolumen", "Minivan"),
     (r"station ?wagon|familiar|rural\b|estate|break\b", "Wagon"),
     (r"\bsuv\b|crossover|todoterreno|todo terreno|campero|\bwagon\b|camioneta", "SUV"),
@@ -329,8 +333,9 @@ _COMBUSTION_RE = re.compile(r"gasolin|diesel|nafta|bencina|petrol|gasoline")
 # Strict matchers for titles / trim names ("Mazda 3 2.0 Sedan Touring Aut"): only explicit
 # tokens count. The generic tables above would misread names ("Frontier" -> FWD) or guess
 # from door counts ("5 puertas" -> Hatchback), which is fine for a body-type field but not here.
+_PICKUP_CAB = r"\b(crew|extended|regular|double|quad|king|access|mega|super) ?cab\b|\bsupercrew\b|\bchassis ?cab\b"
 _BODY_EXPLICIT = [
-    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble)", "Pickup"),
+    (r"pick ?-?up|doble cabina|cabina (sencilla|simple|doble|extendida)|" + _PICKUP_CAB, "Pickup"),
     (r"\bminivan\b|monovolumen", "Minivan"),
     (r"station ?wagon", "Wagon"),
     (r"\bsuv\b|\bcrossover\b", "SUV"),

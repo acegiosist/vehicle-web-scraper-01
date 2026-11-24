@@ -223,6 +223,14 @@ def test_ev_mpge_is_not_fuel_economy(cfg):
     assert rec.parse_warnings == []
 
 
+def test_pickup_without_body_style_from_cab_style(cfg):
+    # Some trucks (new F-150/F-250) come with no bodyStyle and no equipment, only the cab.
+    api = FakeApi([])
+    api.detail = {**DETAIL, "bodyStyle": None, "cabStyle": "Extended Cab", "categoryFeatures": []}
+    rec = _scraper(cfg, api).parse(_listing({**CAR, "trim": "XL"}))
+    assert (rec.body_style, rec.vehicle_type) == ("Pickup", "Pickup")
+
+
 def test_sold_car_is_an_error_not_a_bare_record(cfg):
     with pytest.raises(ValueError, match="no details"):
         _scraper(cfg, FakeApi([])).parse(_listing({**CAR, "vehicleId": "1"}))
@@ -285,3 +293,13 @@ def test_default_page_and_batch_sizes():
 def _listing(car):
     return Listing(car["vehicleId"], f"https://www.driveway.com/shop/vehicle/{car['vehicleId']}",
                    payload=car)
+
+
+def test_only_ids_batches_ask_only_for_selected_cars(cfg):
+    api = FakeApi(_inventory(n_used=6, n_new=0))
+    s = _scraper(cfg, api, detail_batch=6)
+    s.only_ids = {"101", "104"}
+    for listing in s.discover():
+        if listing.listing_id in s.only_ids:
+            s.parse(listing)
+    assert api.details == [["101", "104"]]

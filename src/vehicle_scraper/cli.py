@@ -45,14 +45,27 @@ def parse_max_age(text: str) -> timedelta:
     return timedelta(days=int(m.group(1)) * AGE_UNITS[m.group(2) or "y"])
 
 
+def read_ids_file(path: Path) -> set[str]:
+    """Listing ids, one per line (blank lines and ``#`` comments ignored)."""
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    return {s for s in (line.split("#", 1)[0].strip() for line in lines) if s}
+
+
 def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
-             listed_since: datetime | None = None) -> dict:
+             listed_since: datetime | None = None, only_ids: set[str] | None = None) -> dict:
     """Scrape one site. With ``listed_since``, only listings posted at or after it are saved:
     listings known (from discovery) to be older are skipped without fetching, and listings with
-    no listing date at all are not saved. ``limit`` then counts only listings that pass."""
+    no listing date at all are not saved. ``limit`` then counts only listings that pass.
+
+    With ``only_ids`` (re-extraction after a parser fix), discovery runs as usual but only
+    those listings are fetched and parsed, always re-scraped; the run stops once all were
+    found, and ids discovery never produced (sold, delisted) are counted as ``missing``."""
     cls = REGISTRY[name]
     stats = {"site": name, "saved": 0, "skipped": 0, "errors": 0, "too_old": 0, "no_date": 0,
              "status": "ok"}
+    remaining = set(only_ids) if only_ids is not None else None
+    if remaining is not None:
+        refresh, limit = True, None
     try:
         scraper = cls(settings)
     except RuntimeError as e:                     # e.g. missing API token
@@ -60,12 +73,19 @@ def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
         return stats | {"status": f"not configured: {e}"}
     scraper.listed_since = listed_since           # lets newest-first discovery stop early
     scraper.run_limit = limit
+    scraper.only_ids = set(only_ids) if only_ids is not None else None
     raw_dir = settings.data_dir / "raw" / name
     passed = 0                                    # listings that got past the age filter
     try:
         # Without an age filter discovery itself stops at `limit`; with one, we keep discovering
         # until `limit` listings have passed it.
         for listing in scraper.discover(limit=limit if listed_since is None else None):
+            if remaining is not None:
+                if not remaining:
+                    break
+                if listing.listing_id not in remaining:
+                    continue                      # not selected: never fetched
+                remaining.discard(listing.listing_id)
             if listed_since is not None:
                 if limit is not None and passed >= limit:
                     break
@@ -115,6 +135,8 @@ def run_site(name: str, store: Storage, limit: int | None, refresh: bool,
         log.exception("[%s] discovery failed", name)
     finally:
         scraper.close()
+    if remaining is not None:
+        stats["missing"] = len(remaining)
     return stats
 
 
@@ -136,6 +158,9 @@ def main(argv: list[str] | None = None) -> int:
                         "Uses the site's listing date (API field or sitemap <lastmod>); "
                         "listings without one are not saved")
     r.add_argument("--browser", action="store_true", help="render pages with Playwright")
+    r.add_argument("--ids-file", type=Path, default=None, metavar="FILE",
+                   help="re-extract only these listing ids (one per line), e.g. after a parser fix; "
+                        "implies --refresh for them and needs exactly one --site")
 
     e = sub.add_parser("export", help="export stored records")
     e.add_argument("--format", choices=["csv", "json", "xlsx"], default="csv")
@@ -178,11 +203,18 @@ def main(argv: list[str] | None = None) -> int:
             since = None if args.max_age is None else datetime.now(timezone.utc) - args.max_age
             if since is not None:
                 print(f"Only saving listings posted on or after {since:%Y-%m-%d %H:%M} UTC")
-            results = [run_site(n, store, args.limit, args.refresh, since) for n in names]
+            only_ids = None
+            if args.ids_file is not None:
+                if len(names) != 1:
+                    p.error("--ids-file needs exactly one --site")
+                only_ids = read_ids_file(args.ids_file)
+                print(f"Re-extracting {len(only_ids)} listings of {names[0]} from {args.ids_file}")
+            results = [run_site(n, store, args.limit, args.refresh, since, only_ids) for n in names]
             print("\nRun summary:")
             for s in results:
                 age = f"too_old={s['too_old']:<5} no_date={s['no_date']:<4} " if since is not None else ""
-                print(f"  {s['site']:<12} saved={s['saved']:<5} skipped={s['skipped']:<5} {age}"
+                missing = f"missing={s['missing']:<4} " if "missing" in s else ""
+                print(f"  {s['site']:<12} saved={s['saved']:<5} skipped={s['skipped']:<5} {age}{missing}"
                       f"errors={s['errors']:<4} {s['status']}")
                 if since is not None and s["no_date"] and not (s["saved"] or s["too_old"]):
                     print(f"  {'':<12} ^ this site gave no listing dates, so --max-age saved nothing")
