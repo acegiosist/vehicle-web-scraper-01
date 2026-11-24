@@ -18,3 +18,9 @@ GRANT CONNECT ON DATABASE omnibase TO omnibase_portal;
 GRANT USAGE ON SCHEMA kb, staging TO omnibase_portal;
 GRANT SELECT ON ALL TABLES IN SCHEMA kb, staging TO omnibase_portal;
 GRANT INSERT (kind, payload, requested_by) ON kb.web_action TO omnibase_portal;
+
+-- Tables and views that future migrations create get SELECT automatically. Default privileges
+-- apply only to objects created by the role that runs this ALTER (the owner, who also runs the
+-- migrations), so run this script as that same role. Without this, a new view such as
+-- kb.review_case fails with "permission denied" until the GRANT above is run again.
+ALTER DEFAULT PRIVILEGES IN SCHEMA kb, staging GRANT SELECT ON TABLES TO omnibase_portal;
