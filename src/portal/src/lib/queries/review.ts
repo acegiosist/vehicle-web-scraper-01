@@ -6,12 +6,15 @@ import { io } from "next/cache";
 import { getDb } from "@/lib/db";
 import { isIssue, type Issue } from "@/lib/issues";
 
+/** Rows per page the reviewer can pick (multiples of 10 up to the default, which is the largest). */
+export const QUEUE_PAGE_SIZES = [10, 20, 30, 40, 50] as const;
 export const QUEUE_PAGE_SIZE = 50;
 
 export interface QueueFilters {
   issue?: Issue;
   q?: string;
   page: number;
+  size: number;
 }
 
 export function parseQueueFilters(sp: Record<string, string | string[] | undefined>): QueueFilters {
@@ -19,7 +22,13 @@ export function parseQueueFilters(sp: Record<string, string | string[] | undefin
   const issue = one("tipo");
   const page = Number.parseInt(one("pagina") ?? "1", 10);
   const q = (one("q") ?? "").trim().slice(0, 80);
-  return { issue: isIssue(issue) ? issue : undefined, q: q || undefined, page: page > 0 ? page : 1 };
+  const size = Number.parseInt(one("por") ?? "", 10);
+  return {
+    issue: isIssue(issue) ? issue : undefined,
+    q: q || undefined,
+    page: page > 0 ? page : 1,
+    size: (QUEUE_PAGE_SIZES as readonly number[]).includes(size) ? size : QUEUE_PAGE_SIZE,
+  };
 }
 
 /** Link to a case that remembers the queue's filters, so "Volver a la cola" restores them. */
@@ -32,6 +41,7 @@ export function queueHref(f: QueueFilters, page = f.page): string {
   const p = new URLSearchParams();
   if (f.issue) p.set("tipo", f.issue);
   if (f.q) p.set("q", f.q);
+  if (f.size !== QUEUE_PAGE_SIZE) p.set("por", String(f.size));
   if (page > 1) p.set("pagina", String(page));
   const s = p.toString();
   return s ? `/revision?${s}` : "/revision";
@@ -63,8 +73,8 @@ export async function reviewQueue(f: QueueFilters) {
                "listings_affected", "country_code"])
       .orderBy("listings_affected", "desc")
       .orderBy("id")
-      .limit(QUEUE_PAGE_SIZE)
-      .offset((f.page - 1) * QUEUE_PAGE_SIZE)
+      .limit(f.size)
+      .offset((f.page - 1) * f.size)
       .execute(),
     q.select((eb) => eb.fn.countAll<string>().as("n")).executeTakeFirstOrThrow(),
   ]);

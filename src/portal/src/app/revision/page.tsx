@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { NoAccess } from "@/components/no-access";
+import { PageSizeSelect } from "@/components/page-size-select";
 import { Pagination } from "@/components/pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import {
   caseHref,
   pendingByIssue,
   QUEUE_PAGE_SIZE,
+  QUEUE_PAGE_SIZES,
   queueHref,
   reviewQueue,
   type QueueFilters,
@@ -46,7 +48,7 @@ async function Queue({ searchParams }: PageProps<"/revision">) {
   if (!(await userWithRole("lector"))) return <NoAccess needed="lector" />;
   const filters = parseQueueFilters(await searchParams);
   const [summary, { rows, total }, catalogs] = await Promise.all([pendingByIssue(), reviewQueue(filters), getCatalogs()]);
-  const pageCount = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / filters.size));
   return (
     <div className="space-y-4">
       <nav aria-label="Tipos de caso" className="flex flex-wrap gap-2 text-sm">
@@ -56,6 +58,7 @@ async function Queue({ searchParams }: PageProps<"/revision">) {
         ))}
       </nav>
       <form className="flex flex-wrap items-end gap-2" action="/revision">
+        {filters.size !== QUEUE_PAGE_SIZE && <input type="hidden" name="por" value={filters.size} />}
         <NativeSelect name="tipo" defaultValue={filters.issue ?? ""} className="w-56" aria-label="Tipo">
           <option value="">Todos los tipos</option>
           {ISSUE_ORDER.map((i) => (
@@ -99,7 +102,15 @@ async function Queue({ searchParams }: PageProps<"/revision">) {
           ))}
         </TableBody>
       </Table>
-      <Pagination page={filters.page} pageCount={pageCount} href={(p) => queueHref(filters, p)} />
+      <div className="flex items-center justify-between gap-4">
+        <PageSizeSelect
+          size={filters.size}
+          options={QUEUE_PAGE_SIZES.map((size) => ({ size, href: queueHref({ ...filters, size, page: 1 }) }))}
+        />
+        <div className="flex-1">
+          <Pagination page={filters.page} pageCount={pageCount} href={(p) => queueHref(filters, p)} />
+        </div>
+      </div>
     </div>
   );
 }
