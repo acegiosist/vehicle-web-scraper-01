@@ -158,7 +158,7 @@ debugging.
 
 Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
 powertrain → commercial variant per country and trim, with structured evolution notes.
-So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
+So far (migrations `0001_catalogs_staging` … `0013_year_outside_generation`):
 - **The database is created by its owner.** Code only creates objects, through Alembic
   (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
   schemas. `alembic_version` stays in `public`.
@@ -203,6 +203,15 @@ So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
     Engine changes between years open `generation_split` (a person decides; an approved split
     cuts the generation at that year, `split_from`). A trigger checks the segment against the
     model's class and the body (pickups need pickup segments).
+  - Maintenance on reimport (decided 2026-11-25): listings from years no live generation of
+    their model + body covers open `year_outside_generation` (migration 0013) on the nearest
+    one, one case per generation and side (`field` = `year_to` / `year_from`, current = the
+    boundary, proposed = the farthest year, `evidence.boundary`); an approved/corrected case
+    moves that boundary once, in `build._apply_decisions`, only while the generation still has
+    `evidence.boundary`. Years up to a decided proposal are never asked again; years beyond it
+    reopen the case (the earlier decision goes to `evidence.previous`). Years of a rejected
+    generation propose nothing. No rule ever closes a generation (used-car listings don't
+    prove a model stopped selling): only a cut or an edit of its years.
   - `kb.powertrain` keyed by fuel|transmission|drivetrain|displacement|cylinders (`match_key`,
     frozen; cylinders only without displacement). Keys go most complete first; a key joins the
     only compatible powertrain (Automatic~CVT/DCT, 2WD~FWD/RWD, AWD~4WD, 0.1 L), creates one if
@@ -210,8 +219,10 @@ So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
     is never recreated nor given listings: a key matching it exactly, or whose only compatible
     powertrain it is, stays `powertrain_rejected` (migration 0010); un-rejecting brings them back.
   - Status (`provisional` / `verified` / `rejected`, on all three levels) changes only by a
-    person (editor's Estado field; merging rejects the source generation). `verified` only stops
-    new `generation_split` proposals; a rejected generation's listings become unassigned
+    person (editor's Estado field; merging rejects the source generation). `verified` stops
+    new `generation_split` proposals and freezes the entity's accepted listing evidence (written
+    back as it was each run; a different accepted majority opens `spec_disagreement` with
+    `evidence.verified`; empty fields still fill); a rejected generation's listings become unassigned
     (`no_generation_for_year`), they don't move to a sibling (use Unir for that).
   - `kb.commercial_variant` = generation + powertrain + country + `trim_key` (`''` = trim
     unknown, kept apart). A `rejected` variant is never recreated nor given listings: they keep

@@ -1,7 +1,7 @@
 # Base de conocimiento: pendientes
 
 Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración
-`0012_variant_rejected`).
+`0013_year_outside_generation`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -44,8 +44,18 @@ Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 
 ## Fases siguientes
 
-- [ ] Reglas de mantenimiento automáticas al reimportar (años nuevos, cambios de equipamiento,
-      cierre de generación).
+- [x] Reglas de mantenimiento al reimportar (2026-11-25):
+  - Años nuevos: los anuncios de años fuera del ciclo de su generación abren un caso
+    `year_outside_generation` (uno por generación y lado) que propone extender el inicio o el
+    fin; aprobar lo extiende al recalcular. Los años ya decididos no se vuelven a preguntar; los
+    más nuevos reabren el caso. Migración `0013_year_outside_generation`.
+  - Equipamiento: en una entidad verificada los valores publicados desde anuncios ya no cambian
+    solos; si los anuncios nuevos dicen otra cosa se abre `spec_disagreement`. Sus campos vacíos
+    se llenan como siempre.
+  - Cierre de generación: sin regla automática (solo al cortar o editar los años).
+  - [x] Migración `0013_year_outside_generation` aplicada en omnibase (2026-11-25; solo cambia
+        una restricción, no hace falta `portal_role.sql`). Los casos aparecen con el siguiente
+        Recalcular.
 - [x] Ficha final (2026-11-24): tabla `kb.final_listing` (migración `0011_final_listing`) que
       `kb build` llena en cada recálculo, una fila por anuncio en alcance: gana la base, el
       anuncio solo llena huecos, los sin asignar llevan lo que heredan y su motivo. Probada con

@@ -299,6 +299,100 @@ def test_build_gives_no_listings_to_a_rejected_variant(conn, tmp_path):
     assert q(conn, "SELECT variant_id FROM kb.listing_level WHERE listing_id = 'a0'") == [(vid,)]
 
 
+def decide_now(conn, case, decision, corrected=None):
+    from vehicle_scraper.kb.review import record_decision
+    with conn.transaction(), conn.cursor() as cur:
+        return record_decision(cur, case, decision, corrected, None, None, "test")
+
+
+def outside_case(conn, field):
+    return q(conn, "SELECT id, status, current_value, proposed_value, listings_affected, evidence "
+                   "FROM kb.review_item WHERE issue = 'year_outside_generation' AND field = %s", field)[0]
+
+
+def test_years_outside_the_cycle_propose_extending_it(conn, tmp_path):
+    from vehicle_scraper.kb.review import InvalidDecision
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(5)]      # 5: an accepted model
+    built(conn, tmp_path, recs)
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    conn.execute("UPDATE kb.generation SET year_from = 2016, year_to = 2019 WHERE id = %s", (gid,))
+    # a reimport brings years after and before the official cycle
+    recs += [creta("n1", 2021, 1.6, drivetrain="FWD"), creta("n2", 2021, 1.6, drivetrain="FWD"),
+             creta("n3", 2022, 1.6, drivetrain="FWD"), creta("o1", 2014, 1.6, drivetrain="FWD")]
+    s = built(conn, tmp_path, recs)
+    assert s["unassigned"] == {"no_generation_for_year": 4}
+    to_id, status, current, proposed, n, evidence = outside_case(conn, "year_to")
+    assert (status, current, proposed, n) == ("pending", 2019, 2022, 3)
+    assert evidence["years"] == {"2021": 2, "2022": 1} and evidence["boundary"] == 2019
+    from_id, status, current, proposed, n, _ = outside_case(conn, "year_from")
+    assert (status, current, proposed, n) == ("pending", 2016, 2014, 1)
+
+    # a correction must extend the cycle
+    with pytest.raises(InvalidDecision, match="no extiende"):
+        decide_now(conn, from_id, "corregir", 2017)
+    assert decide_now(conn, to_id, "aprobar") == "approved"
+    assert decide_now(conn, from_id, "rechazar") == "rejected"
+    # nothing moves until the recalculation, which extends the end and assigns those listings
+    assert q(conn, "SELECT year_from, year_to FROM kb.generation WHERE id = %s", gid) == [(2016, 2019)]
+    recs += [creta("o2", 2015, 1.6, drivetrain="FWD")]       # older, but within the rejected proposal
+    s = built(conn, tmp_path, recs)
+    assert q(conn, "SELECT year_from, year_to, source FROM kb.generation WHERE id = %s", gid) == [(2016, 2022, "manual")]
+    assert s["unassigned"] == {"no_generation_for_year": 2}
+    assert s["review_pending"].get("year_outside_generation") is None    # decided years aren't asked again
+    assert outside_case(conn, "year_from")[1] == "rejected"
+
+    # years beyond both decisions ask again, keeping the earlier decision
+    recs += [creta("n4", 2023, 1.6, drivetrain="FWD"), creta("o3", 2013, 1.6, drivetrain="FWD")]
+    built(conn, tmp_path, recs)
+    _, status, current, proposed, n, evidence = outside_case(conn, "year_to")
+    assert (status, current, proposed, n) == ("pending", 2022, 2023, 1)
+    assert evidence["previous"]["status"] == "approved" and evidence["previous"]["proposed"] == 2022
+    _, status, current, proposed, _, evidence = outside_case(conn, "year_from")
+    assert (status, current, proposed) == ("pending", 2016, 2013)
+    assert evidence["previous"]["status"] == "rejected"
+
+
+def test_years_of_a_rejected_generation_propose_nothing(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
+    recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]
+    built(conn, tmp_path, recs)
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    with conn.cursor() as cur:
+        from vehicle_scraper.kb.build import split_generation
+        new = split_generation(cur, gid, 2021)
+    conn.execute("UPDATE kb.generation SET status = 'rejected' WHERE id = %s", (new,))
+    s = build(conn)
+    assert s["unassigned"] == {"no_generation_for_year": 4}
+    assert q(conn, "SELECT count(*) FROM kb.review_item WHERE issue = 'year_outside_generation'") == [(0,)]
+
+
+def test_a_verified_variant_keeps_its_values(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", sunroof=True) for i in range(5)]
+    built(conn, tmp_path, recs)
+    vid = q(conn, "SELECT id FROM kb.commercial_variant")[0][0]
+    assert q(conn, "SELECT sunroof, leather_seats FROM kb.commercial_variant") == [(True, None)]
+    conn.execute("UPDATE kb.commercial_variant SET status = 'verified' WHERE id = %s", (vid,))
+    # new listings say otherwise (12 of 17 without sunroof) and bring a value the variant lacked
+    recs += [creta(f"b{i}", 2017, 1.6, drivetrain="FWD", sunroof=False) for i in range(12)]
+    recs = [r.model_copy(update={"leather_seats": True}) for r in recs]
+    built(conn, tmp_path, recs)
+    assert q(conn, "SELECT sunroof, leather_seats FROM kb.commercial_variant") == [(True, True)]
+    case, current, proposed, evidence = q(conn, "SELECT id, current_value, proposed_value, evidence FROM kb.review_item "
+                                                "WHERE issue = 'spec_disagreement' AND field = 'sunroof'")[0]
+    assert (current, proposed, evidence["verified"]) == (True, False, True)
+    # the frozen value stays run after run, until a person decides
+    build(conn)
+    assert q(conn, "SELECT sunroof FROM kb.commercial_variant") == [(True,)]
+    assert decide_now(conn, case, "aprobar") == "approved"
+    build(conn)
+    assert q(conn, "SELECT sunroof FROM kb.commercial_variant") == [(False,)]
+    # a provisional variant just follows its listings
+    conn.execute("UPDATE kb.commercial_variant SET status = 'provisional' WHERE id = %s", (vid,))
+    conn.execute("DELETE FROM kb.spec_evidence WHERE source_kind = 'manual'")
+    build(conn)
+    assert q(conn, "SELECT sunroof FROM kb.commercial_variant") == [(False,)]
+
+
 def test_build_is_stable_and_applies_decisions(conn, tmp_path):
     recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
     recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]

@@ -51,6 +51,7 @@ const CORRECTION_HINTS: Partial<Record<Issue, string>> = {
   weak_model: "Nombre del modelo. Si ya existe en la marca, se unen.",
   model_is_attributes: "Nombre del modelo de este anuncio.",
   generation_split: "Año (p. ej. 2020).",
+  year_outside_generation: "Año de fin (o de inicio) que debe tener la generación.",
   evolution_note: "Año desde el que aplica.",
 };
 

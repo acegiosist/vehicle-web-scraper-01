@@ -15,9 +15,13 @@ Run after ``kb clean``. In one transaction under the writer lock:
 4. **Commercial variants**: generation + powertrain + country + trim (``''`` = trim unknown).
    A rejected variant is never recreated nor given listings: they keep their generation and
    powertrain and stay ``variant_rejected``.
+   Listings from years outside every live generation's cycle open ``year_outside_generation``
+   on the nearest one (extend its start or end); a person decides, never automatic.
 5. **Evidence from listings**, recomputed every run: mechanical numbers from one plausible
    listing (most repeated value; > 10 % spread opens ``spec_disagreement``); equipment with
-   >= 2 listings and >= 70 % agreement. Other sources' evidence is never touched.
+   >= 2 listings and >= 70 % agreement. Other sources' evidence is never touched. A verified
+   entity keeps its accepted listing values (a different majority opens ``spec_disagreement``);
+   only its empty fields fill.
 6. **Publish**: each level column gets its best accepted evidence (manual > external >
    listings > ai). Columns are derived: change a value through evidence, not by hand.
 7. **Proposals** for a person: ``generation_split`` (the engine changes between years) and
@@ -42,7 +46,8 @@ from .levels import (BOOLEAN, EQUIP_MIN_AGREEMENT, EQUIP_MIN_SUPPORT, EQUIPMENT_
                      LISTING_FIELD_OF, POWERTRAIN_FROM_LISTINGS, RANGES, SOURCE_RANK, VARIANT_COLUMNS,
                      VARIANT_FROM_LISTINGS)
 
-BUILD_ISSUES = ("generation_split", "spec_disagreement", "evolution_note")
+BUILD_ISSUES = ("generation_split", "year_outside_generation", "spec_disagreement", "evolution_note")
+CYCLE_FIELDS = ("year_from", "year_to")
 DISPLACEMENT_TOLERANCE = 0.1
 SPLIT_MIN_LISTINGS = 3          # listings needed on each side of a proposed generation split
 SPLIT_MIN_SHARE = 0.10          # an engine below this share of its side doesn't count
@@ -212,6 +217,17 @@ WHERE r.issue = 'generation_split' AND r.status IN ('approved', 'corrected')
   AND NOT EXISTS (SELECT 1 FROM kb.generation c WHERE c.split_from = r.entity_key::bigint)"""):
         year = int(((corrected if status == "corrected" else proposed) or {}).get("year_from"))
         split_generation(cur, gen_id, year)
+    # Approved extensions of a generation's cycle (year_outside_generation): applied once, while
+    # the generation still has the boundary the case was opened against (a later edit of its
+    # years wins, and an applied case doesn't apply again).
+    for gen_id, fname, status, proposed, corrected, evidence in _load(cur, """
+SELECT entity_key::bigint, field, status, proposed_value, corrected_value, evidence FROM kb.review_item
+WHERE issue = 'year_outside_generation' AND status IN ('approved', 'corrected')"""):
+        if fname not in CYCLE_FIELDS:
+            continue
+        year = int(corrected if status == "corrected" else proposed)
+        cur.execute(f"UPDATE kb.generation SET {fname} = %s, source = 'manual', updated_at = now() "
+                    f"WHERE id = %s AND {fname} = %s", (year, gen_id, (evidence or {}).get("boundary")))
     # Corrected or approved values become manual evidence, which no rule overrides.
     for etype, eid, fname, status, proposed, current, corrected, case_id in _load(cur, """
 SELECT entity_type, entity_key::bigint, field, status, proposed_value, current_value, corrected_value, id
@@ -231,6 +247,63 @@ WHERE issue = 'evolution_note' AND status IN ('approved', 'corrected')"""):
 INSERT INTO kb.evolution_note (variant_id, field, value, year_from, source, review_item_id)
 VALUES (%s, %s, %s, %s, 'manual', %s) ON CONFLICT DO NOTHING""",
                     (vid, fname, json.dumps(note.get("value")), int(note["year_from"]), case_id))
+
+
+def _propose_cycle_extensions(cur, cases: Cases, listings: list, gens: dict, model_names: dict) -> None:
+    """``year_outside_generation``: listings whose year no live generation of their model and
+    body covers propose extending the nearest one, one case per generation and side (field
+    ``year_to`` / ``year_from``, current = the boundary, proposed = the farthest year). Years of
+    a rejected generation are a person's decision and propose nothing.
+
+    A decided case is never asked again for the years it covered (up to its proposal, whatever
+    the decision). When years beyond it show up, the case is asked again (pending), with the
+    earlier decision kept in its evidence.
+    """
+    rejected: dict[tuple, list[tuple]] = defaultdict(list)
+    for mid, body, yf, yt in _load(cur, "SELECT model_id, body_style_code, year_from, year_to FROM kb.generation "
+                                        "WHERE status = 'rejected'"):
+        rejected[(mid, body)].append((yf, yt))
+    outside: dict[tuple, Counter] = defaultdict(Counter)          # (generation id, field) -> years
+    for l in listings:
+        if l.reason != "no_generation_for_year" or l.year is None:
+            continue
+        same = [g for g in gens[l.model_id] if l.body is None or g.body == l.body]
+        if len({g.body for g in same}) != 1:                       # no generation, or body unknown
+            continue
+        if any((yf is None or l.year >= yf) and (yt is None or l.year <= yt)
+               for yf, yt in rejected[(l.model_id, same[0].body)]):
+            continue
+
+        def gap(g):
+            return g.year_from - l.year if g.year_from is not None and l.year < g.year_from else l.year - g.year_to
+        g = min(same, key=lambda g: (gap(g), -(g.year_from or 0)))  # nearest; a tie goes to the later one
+        side = "year_from" if g.year_from is not None and l.year < g.year_from else "year_to"
+        outside[(g.id, side)][l.year] += 1
+    if not outside:
+        return
+    by_id = {g.id: g for gl in gens.values() for g in gl}
+    decided = {(int(k), f): (rid, status, proposed, evidence, by, at) for rid, k, f, status, proposed, evidence, by, at
+               in _load(cur, """
+SELECT id, entity_key, field, status, proposed_value, evidence, decided_by, decided_at FROM kb.review_item
+WHERE issue = 'year_outside_generation' AND status IN ('approved', 'corrected', 'rejected')""")}
+    for (gid, side), years in sorted(outside.items()):
+        g = by_id[gid]
+        boundary = getattr(g, side)
+        proposed = max(years) if side == "year_to" else min(years)
+        evidence = {"boundary": boundary, "years": {str(y): n for y, n in sorted(years.items())},
+                    "model": model_names[g.model_id]}
+        prev = decided.get((g.id, side))
+        if prev:
+            rid, status, prev_proposed, _, by, at = prev
+            beyond = proposed > prev_proposed if side == "year_to" else proposed < prev_proposed
+            if not beyond:
+                continue                                           # those years were already decided
+            evidence["previous"] = {"status": status, "proposed": prev_proposed, "decided_by": by,
+                                    "decided_at": at.isoformat() if at else None}
+            cur.execute("UPDATE kb.review_item SET status = 'pending', corrected_value = NULL, decided_by = NULL, "
+                        "decided_at = NULL, note = NULL WHERE id = %s", (rid,))
+        cases.add("generation", g.id, "year_outside_generation", field_name=side, current=boundary,
+                  proposed=proposed, evidence=evidence, listings=sum(years.values()))
 
 
 # --- the run --------------------------------------------------------------------------------
@@ -302,6 +375,7 @@ ORDER BY id"""):
             g = min(cands, key=lambda g: ((g.year_to or 9999) - (g.year_from or 0), g.id))
             l.generation = g.id
             g.listings.append(l)
+        _propose_cycle_extensions(cur, cases, listings, gens, model_names)
 
         # 3. powertrains ---------------------------------------------------------------------
         # Rejected powertrains (a person's decision) never get listings and are never recreated:
@@ -399,6 +473,19 @@ VALUES (%s, %s, %s, %s, %s) RETURNING id""", (*vkey[:3], name, vkey[3]))
                         "WHERE id = %s", [(len(ls), *years(ls), vid) for vid, ls in by["variant"].items()])
 
         # 5. evidence from listings ---------------------------------------------------------------
+        # A verified entity keeps the listing values it was verified with: its accepted listing
+        # evidence is written back as it was, and when the listings now say otherwise a
+        # spec_disagreement asks a person. Its empty fields still fill with the usual rules.
+        verified = {("generation", g.id) for g in all_gens if g.status == "verified"}
+        verified |= {(etype, eid) for etype, table in (("powertrain", "kb.powertrain"),
+                                                       ("variant", "kb.commercial_variant"))
+                     for (eid,) in _load(cur, f"SELECT id FROM {table} WHERE status = 'verified'")}
+        frozen: dict[tuple, tuple] = {}
+        for etype, eid, f, value, support, agreement, detail in _load(cur, """
+SELECT entity_type, entity_id, field, value, support, agreement, detail FROM kb.spec_evidence
+WHERE source_kind = 'listings' AND status = 'accepted'"""):
+            if (etype, eid) in verified:
+                frozen[(etype, eid, f)] = (value, support, agreement, detail)
         evidence = []
         voting = {"generation": GENERATION_FROM_LISTINGS, "powertrain": POWERTRAIN_FROM_LISTINGS,
                   "variant": VARIANT_FROM_LISTINGS}
@@ -412,11 +499,18 @@ VALUES (%s, %s, %s, %s, %s) RETURNING id""", (*vkey[:3], name, vkey[3]))
                     if not r:
                         continue
                     detail = {"counts": {str(k): n for k, n in r["counts"].most_common(10)}}
-                    evidence.append((level, eid, f, json.dumps(r["value"]), r["status"], r["support"],
-                                     round(r["agreement"], 3), json.dumps(detail)))
                     if r["disagree"]:
                         cases.add(level, eid, "spec_disagreement", field_name=f, current=r["value"],
                                   proposed=r["value"], evidence=detail, listings=r["support"])
+                    kept = frozen.get((level, eid, f))
+                    if kept is None:
+                        evidence.append((level, eid, f, json.dumps(r["value"]), r["status"], r["support"],
+                                         round(r["agreement"], 3), json.dumps(detail)))
+                    elif r["status"] == "accepted" and json.loads(json.dumps(r["value"])) != kept[0]:
+                        cases.add(level, eid, "spec_disagreement", field_name=f, current=kept[0],
+                                  proposed=r["value"], evidence={**detail, "verified": True}, listings=r["support"])
+        for (level, eid, f), (value, support, agreement, detail) in frozen.items():
+            evidence.append((level, eid, f, json.dumps(value), "accepted", support, agreement, json.dumps(detail)))
         cur.execute("DELETE FROM kb.spec_evidence WHERE source_kind = 'listings'")
         with cur.copy("COPY kb.spec_evidence (entity_type, entity_id, field, value, status, support, agreement, "
                       "detail, source_kind) FROM STDIN") as copy:

@@ -38,7 +38,8 @@ CATALOG_FIELDS = {"body_style": "body_style", "fuel_type": "fuel_type", "transmi
 TEXT_FIELDS = {"tire_size", "country_of_manufacture"}
 # Order of the rows: identity first (it unblocks the most), then levels, then listings.
 ISSUE_ORDER = ["unknown_make", "missing_make", "weak_model", "model_is_attributes", "generation_split",
-               "spec_disagreement", "evolution_note", "field_conflict", "implausible_value"]
+               "year_outside_generation", "spec_disagreement", "evolution_note", "field_conflict",
+               "implausible_value"]
 
 # issue: (what to check, approve, reject, correct)
 ISSUES = {
@@ -55,8 +56,15 @@ ISSUES = {
                             "Dejarlo sin modelo.", "Dejarlo sin modelo.", "Escribir el modelo de ese anuncio."),
     "generation_split": ("El motor cambia entre años: se propone dividir la generación desde el año propuesto.",
                          "Dividir en el año propuesto.", "No dividir.", "Escribir el año correcto del corte."),
-    "spec_disagreement": ("Los anuncios no coinciden en un dato mecánico (más de 10 % de diferencia).",
-                          "El valor propuesto es correcto.", "No fijar el valor (siguen votando los anuncios).",
+    "year_outside_generation": ("Hay anuncios de años fuera del ciclo de esta generación: se propone extender "
+                                "su año de inicio o de fin.",
+                                "Extender el ciclo hasta el año propuesto (los anuncios entran al recalcular).",
+                                "No extender: esos anuncios siguen sin asignar.",
+                                "Escribir el año correcto de inicio o de fin."),
+    "spec_disagreement": ("Los anuncios no coinciden en un dato mecánico (más de 10 % de diferencia), o "
+                          "cambiarían un valor de una entidad verificada.",
+                          "El valor propuesto es correcto.",
+                          "No fijar el valor (siguen votando los anuncios; en una verificada se queda el actual).",
                           "Escribir el valor correcto."),
     "evolution_note": ("Un equipamiento cambia desde un año en esta variante: se propone una nota de evolución.",
                        "Crear la nota (campo, valor y año propuestos).", "No crear la nota.",
@@ -211,6 +219,13 @@ def decide(cur, case: dict, decision: str, corrected, klass) -> tuple[str, objec
         return status, {"name": name} if issue == "weak_model" else {"model": name}
     if issue == "generation_split":
         return status, {"year_from": _year(corrected)}
+    if issue == "year_outside_generation":
+        # the new end must lie after the current one (or the new start before it)
+        year, boundary = _year(corrected), case["current"]
+        if boundary is not None and (year <= boundary if fname == "year_to" else year >= boundary):
+            raise InvalidDecision(f"{year} no extiende el ciclo: el {'fin' if fname == 'year_to' else 'inicio'} "
+                                  f"actual es {boundary}")
+        return status, year
     if issue == "evolution_note":
         return status, {"value": (case["proposed"] or {}).get("value"), "year_from": _year(corrected)}
     return status, parse_value(cur, fname, corrected)
