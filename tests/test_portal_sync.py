@@ -48,7 +48,7 @@ def test_roles_match():
     roles = re.search(r"ROLES = \[(.*?)\]", ROLES_TS).group(1)
     assert re.findall(r'"(\w+)"', roles) == sorted(worker.ROLE_RANK, key=worker.ROLE_RANK.get)
     table = dict(re.findall(r"\n\s+(\w+): \"(\w+)\",", re.search(r"ACTION_ROLE = \{(.*?)\}", ROLES_TS, re.S).group(1)))
-    kinds = set(worker.HANDLERS) | {"recalculate"}
+    kinds = set(worker.HANDLERS) | worker.DEFERRED
     assert set(table) == kinds
     assert table == {k: worker.REQUIRED_ROLE.get(k, "editor") for k in kinds}
 

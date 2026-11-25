@@ -204,6 +204,21 @@ export interface KbExclusionReason {
   sort_order: Generated<number>;
 }
 
+export interface KbExternalSource {
+  active: Generated<boolean>;
+  code: string;
+  countries: Generated<string[]>;
+  created_at: Generated<Timestamp>;
+  credit: string;
+  name: string;
+  paid: Generated<boolean>;
+  priority: Generated<number>;
+  provides: string;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+  url: string;
+}
+
 export interface KbFinalListing {
   abs: boolean | null;
   adaptive_cruise_control: boolean | null;
@@ -512,6 +527,10 @@ export interface KbSpecEvidence {
   entity_type: string;
   field: string;
   id: Generated<Int8>;
+  /**
+   * Fuente de un valor externo: captura (la plantilla) o un código de kb.external_source; vacío en los demás
+   */
+  source_code: Generated<string>;
   source_kind: string;
   status: string;
   support: Generated<number>;
@@ -701,6 +720,7 @@ export interface DB {
   "kb.drivetrain": KbDrivetrain;
   "kb.evolution_note": KbEvolutionNote;
   "kb.exclusion_reason": KbExclusionReason;
+  "kb.external_source": KbExternalSource;
   "kb.final_listing": KbFinalListing;
   "kb.fuel_type": KbFuelType;
   "kb.generation": KbGeneration;

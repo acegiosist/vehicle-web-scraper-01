@@ -20,6 +20,9 @@ export const ACTION_ROLE = {
   recalculate: "editor",
   export_specs: "revisor",
   import_specs: "revisor",
+  source_lookup: "revisor",
+  source_apply: "revisor",
+  source_update: "editor",
 } as const satisfies Record<string, Role>;
 
 export type ActionKind = keyof typeof ACTION_ROLE;

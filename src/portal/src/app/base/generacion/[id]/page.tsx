@@ -8,6 +8,7 @@ import { FieldEditor } from "@/components/edit/field-editor";
 import { GenerationTools } from "@/components/edit/generation-tools";
 import { RecentActions } from "@/components/edit/recent-actions";
 import { Sheet } from "@/components/knowledge/sheet";
+import { SourcePanel } from "@/components/sources/source-panel";
 import { NoAccess } from "@/components/no-access";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import { formatValue, GENERATION_SHEET } from "@/lib/fields";
 import { formatInt, formatYears } from "@/lib/format";
 import { recentActionsFor } from "@/lib/queries/actions";
 import { generation, getCatalogs } from "@/lib/queries/knowledge";
+import { applicableSources, externalSources, lookupsFor } from "@/lib/queries/sources";
 
 export const metadata: Metadata = { title: "Generación" };
 
@@ -38,10 +40,14 @@ async function GenerationView({ params }: PageProps<"/base/generacion/[id]">) {
   const { id } = await params;
   const n = Number(id);
   // Requests first, then the data they change (see recentActionsFor).
-  const actions = await recentActionsFor([{ entity_type: "generation", entity_id: n }, { generation_id: n }, { source_id: n }, { target_id: n }]);
-  const [found, catalogs] = await Promise.all([generation(id), getCatalogs()]);
+  const [actions, lookups] = await Promise.all([
+    recentActionsFor([{ entity_type: "generation", entity_id: n }, { generation_id: n }, { source_id: n }, { target_id: n }]),
+    Number.isInteger(n) && n > 0 ? lookupsFor(n) : [],
+  ]);
+  const [found, catalogs, sources] = await Promise.all([generation(id), getCatalogs(), externalSources()]);
   if (!found) notFound();
   const editor = hasRole(user.role, "editor");
+  const revisor = hasRole(user.role, "revisor");
   const target = { entityType: "generation" as const, entityId: id };
   const { g, powertrains, variants, evidence, siblings } = found;
   const countries = [...new Set(variants.map((v) => v.country_code))];
@@ -101,6 +107,17 @@ async function GenerationView({ params }: PageProps<"/base/generacion/[id]">) {
           </Card>
           <GenerationTools generationId={id} siblings={siblings} />
         </div>
+      )}
+      {revisor && (
+        <SourcePanel
+          generationId={id}
+          countries={countries}
+          sources={sources}
+          offered={applicableSources(sources, countries)}
+          lookups={lookups}
+          powertrainLabels={ptLabel}
+          catalogs={catalogs}
+        />
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

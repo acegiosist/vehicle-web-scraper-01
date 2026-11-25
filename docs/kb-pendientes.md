@@ -1,7 +1,7 @@
 # Base de conocimiento: pendientes
 
 Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración
-`0016_vehicle_identity`).
+`0017_external_sources`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -28,8 +28,22 @@ Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
   - [x] Migraciones `0014_generation_cycle` y `0015_capture_actions` aplicadas en omnibase
         (2026-11-25; solo cambian restricciones, no hace falta `portal_role.sql`).
   - [ ] Llenar la plantilla (trabajo del equipo), empezando por los modelos con más anuncios.
-  - [ ] Conjuntos de datos públicos (p. ej. fueleconomy.gov para EE. UU.) y lotes con Claude:
-        sin empezar.
+  - [x] Fuentes externas automáticas (2026-11-25, migración `0017_external_sources`): registro
+        `kb.external_source` (activa, países —por defecto solo EE. UU.—, de pago, prioridad),
+        editable por editores en la página Fuentes del portal. Cada fuente guarda su propia
+        evidencia; entre externas gana lo capturado en la plantilla y luego la prioridad. Primeras
+        dos: vPIC de NHTSA (largo, ancho, alto y distancia entre ejes por modelo y año) y
+        fueleconomy.gov (consumo, cilindros, velocidades y autonomía eléctrica por tren motriz).
+        Se consultan una generación a la vez desde `/base/generacion/[id]` (revisor): el modal
+        compara lo que hay con lo que respondió la fuente, se acepta valor por valor y se guarda
+        todo de una vez; lo aceptado se publica en el momento.
+  - [x] `0017_external_sources` aplicada en omnibase (2026-11-25). El rol del portal ya lee
+        `kb.external_source`. Hay que reiniciar el worker (la llave única de `kb.spec_evidence`
+        cambió y el worker viejo falla al editar valores).
+  - [ ] Más adelante: correr una fuente para muchas generaciones a la vez (por terminal), fuentes
+        de pago (marcadas `paid`, hoy no se consultan) y otros datos de vPIC que hoy no tienen
+        columna (peso en vacío). La decodificación por VIN de vPIC no aplica: no guardamos VIN.
+  - [ ] Lotes con Claude: sin empezar (falta la clave de API; cada envío necesita aprobación).
 - [ ] **Asignar el segmento a cada generación**: la regla por largo propone (A < 3,7 m … F > 5,1 m),
       luego fuentes externas o Claude, y la corrección manual gana. Depende de tener las
       dimensiones.

@@ -257,3 +257,49 @@ test.describe("captura (revisor)", () => {
     await expect(result.getByTestId("upload-saved")).toHaveText("Nada nuevo.");
   });
 });
+
+test.describe("fuentes externas", () => {
+  test.describe("revisor", () => {
+    test.use({ as: "revisor" });
+
+    test("consulta vPIC desde la generación, compara y acepta valor por valor", async ({ page }) => {
+      await page.goto("/base");
+      await page.getByRole("link", { name: "Kia" }).click();
+      await page.getByRole("link", { name: "Sportage (SUV)", exact: true }).click();
+      const panel = page.getByTestId("source-panel").filter({ visible: true });
+      await panel.getByLabel("Fuente").selectOption("vpic_canada");
+      await panel.getByRole("button", { name: "Consultar" }).click();
+      // the worker asks the source (saved answers in the tests) and writes nothing yet
+      const open = panel.getByTestId("open-comparison").first();
+      await expect(open).toHaveText("Comparar y aceptar", { timeout: 30_000 });
+      await open.click();
+      const dialog = page.getByTestId("comparison");
+      await expect(dialog.getByTestId("comparison-row")).toHaveCount(4);
+      await expect(dialog.locator('[data-key$=":length_mm"]')).toContainText(/4\.?440 mm/);
+      // what the base doesn't have yet starts ticked; leave the width out and save the rest at once
+      await dialog.getByLabel("Aceptar Ancho (Generación)").uncheck();
+      await dialog.getByTestId("save-accepted").click();
+      await expect(dialog).toBeHidden();
+      const length = page.locator('tr[data-field="length_mm"]').filter({ visible: true });
+      await expect(length).toContainText(/4\.?440 mm/, { timeout: 30_000 });
+      await expect(length).toContainText("vPIC");
+      await expect(page.locator('tr[data-field="width_mm"]').filter({ visible: true })).not.toContainText("vPIC");
+      await expect(panel.getByTestId("lookup-saved").first()).toBeVisible();
+    });
+  });
+
+  test.describe("editor", () => {
+    test.use({ as: "editor" });
+
+    test("configura a qué países aplica una fuente", async ({ page }) => {
+      await page.goto("/fuentes");
+      const card = page.locator('[data-code="fueleconomy"]').filter({ visible: true });
+      await expect(card.getByTestId("source-countries")).toHaveText("US");
+      const form = card.getByTestId("source-form");
+      await form.getByLabel("Países").fill("us, co");
+      await form.getByLabel("Prioridad").fill("30");
+      await form.getByRole("button", { name: "Guardar" }).click();
+      await expect(card.getByTestId("source-countries")).toHaveText("CO, US", { timeout: 30_000 });
+    });
+  });
+});

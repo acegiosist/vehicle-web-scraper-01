@@ -160,7 +160,7 @@ debugging.
 
 Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
 powertrain → commercial variant per country and trim, with structured evolution notes.
-So far (migrations `0001_catalogs_staging` … `0016_vehicle_identity`):
+So far (migrations `0001_catalogs_staging` … `0017_external_sources`):
 - **The database is created by its owner.** Code only creates objects, through Alembic
   (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
   schemas. `alembic_version` stays in `public`.
@@ -287,12 +287,38 @@ So far (migrations `0001_catalogs_staging` … `0016_vehicle_identity`):
   both sides) travels base64 in the `payload` and is saved by `specs.save_template` as the
   uploader's external evidence, **without** rebuilding (it publishes on Recalcular). Lists
   read `payload - 'file_b64'` / `result - 'file_b64'`, never the files.
+- External sources (migration 0017, `kb/sources/`, decided 2026-11-25): `kb.external_source`
+  is the registry (code, name, url, credit, what it provides, `paid`, `active`, `countries` —
+  empty = all, seeded `{US}` — and `priority`, lower first), edited by editors on `/fuentes`
+  (action `source_update`). `kb.spec_evidence.source_code` says which source gave an `external`
+  value (unique key now includes it): `captura` for the template, else a registry code; other
+  kinds keep `''`. Among external values `captura` wins, then the priority
+  (`sources.evidence_rank`, used by `kb build`, the worker and the portal's `evidenceFor`).
+  Seeded adapters, each a pure `propose(target, answers)` tested offline against
+  `tests/fixtures/sources/kia_sportage.json` plus a `lookup(client, target)` through
+  `PoliteClient`: `vpic.py` (NHTSA vPIC `GetCanadianVehicleSpecifications`: generation length,
+  width, height, wheelbase in cm -> mm; versions whose name starts with the model, narrowed to
+  the body's word) and `fueleconomy.py` (the fueleconomy.gov web service per year: menu/model ->
+  menu/options -> vehicle; a record matches a powertrain with build's compatibility rules and
+  only in the years it was sold in the source's countries; economy from the label's mpg,
+  cylinders, gears from `trany`, EV range). Only make, model and years are sent. Flow, one
+  generation at a time from `/base/generacion/[id]` (revisor): `source_lookup` (deferred like
+  `recalculate`: marked running, requests outside any transaction, writes nothing; only active,
+  unpaid sources with a variant with listings in their countries) puts proposals with the
+  current value and source in its result; the portal's modal (`components/sources/`) shows
+  base vs source with a checkbox per value and one Guardar; `source_apply` takes the values
+  from that lookup's result (never from the request), saves them as accepted external evidence
+  of that source (`detail`: credit, accepted_by, lookup_id, records, years, matched) and
+  publishes those columns at once (`worker.publish_fields`, best evidence wins, so manual still
+  wins); listings move only on Recalcular. `KB_SOURCES_FIXTURES` (a JSON url -> answer file)
+  makes the worker answer from saved responses: tests only.
 - Portal backend (migration `0007_portal`, `kb/worker.py`; the Next.js site goes in
   `src/portal`, never `src/web`, which holds old-branch leftovers): `kb.app_user` maps an
   email (from GCP IAP) to `lector` < `revisor` < `editor`; `kb.web_action` is the only table
   the portal writes (`docs/sql/portal_role.sql`: SELECT on kb/staging, INSERT of kind, payload,
   requested_by only). `kb worker` LISTENs on `kb_web_action`, re-checks the requester's role
-  (`decide_case` needs revisor, everything else editor), validates with the review code
+  (`worker.REQUIRED_ROLE`: revisor for decide_case, export/import_specs and source_lookup/apply;
+  everything else editor), validates with the review code
   (`review.record_decision`, `parse_value`) and applies each action in a savepoint: `applied`
   with a result or `failed` with the error. Edits of published columns become manual
   evidence (and update the column at once); identity columns (generation name/years/status,
@@ -318,7 +344,9 @@ So far (migrations `0001_catalogs_staging` … `0016_vehicle_identity`):
   `/fichas/[id]` (one vehicle by variant id: values with their source, evolution notes, its
   listings) → `/fichas/anuncio/[sitio]/[anuncio]` (one listing's kb.final_listing record,
   `lib/final-listing.ts`; reached from a vehicle, the variant's listings and listing cases), `/captura`
-  (capture template: prepare, download, upload; revisor), `/catalogos`,
+  (capture template: prepare, download, upload; revisor), `/fuentes` (external sources' registry;
+  editors change active / countries / priority; the generation page's "Fuentes externas" card
+  queries them and opens the comparison modal), `/catalogos`,
   `/usuarios` (editors only), `/acciones` (history). Every write is a server action in
   `lib/actions/request.ts` (Zod in `schemas.ts`, role checked) that only INSERTs into
   `kb.web_action`; editors get inline `FieldEditor`s on the sheets (published values become

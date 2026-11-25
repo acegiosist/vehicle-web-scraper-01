@@ -5,7 +5,7 @@ import { sql } from "kysely";
 import { io } from "next/cache";
 
 import { getDb } from "@/lib/db";
-import { SOURCE_RANK, type Catalogs } from "@/lib/fields";
+import { CAPTURE_SOURCE, SOURCE_RANK, type Catalogs } from "@/lib/fields";
 
 const CATALOG_TABLES = [
   "segment", "body_style", "fuel_type", "transmission_type", "drivetrain", "headlight_type", "brake_type",
@@ -69,20 +69,28 @@ export async function makeWithGenerations(id: string) {
 /** Published value + source of every field of one entity, from kb.spec_evidence. */
 async function evidenceFor(entityType: "generation" | "powertrain" | "variant", id: string) {
   const rows = await getDb()
-    .selectFrom("kb.spec_evidence")
-    .select(["field", "source_kind", "value", "status", "support", "agreement"])
-    .where("entity_type", "=", entityType)
-    .where("entity_id", "=", id)
+    .selectFrom("kb.spec_evidence as e")
+    .leftJoin("kb.external_source as s", "s.code", "e.source_code")
+    .select(["e.field", "e.source_kind", "e.source_code", "e.value", "e.status", "e.support", "e.agreement",
+             "s.name as source_name", "s.priority as source_priority"])
+    .where("e.entity_type", "=", entityType)
+    .where("e.entity_id", "=", id)
     .execute();
   const byField: Record<string, { published?: (typeof rows)[number]; candidates: typeof rows }> = {};
   for (const r of rows) {
     const e = (byField[r.field] ??= { candidates: [] });
     e.candidates.push(r);
-    if (r.status === "accepted" && (!e.published || SOURCE_RANK[r.source_kind] < SOURCE_RANK[e.published.source_kind])) {
+    if (r.status === "accepted" && (!e.published || evidenceRank(r) < evidenceRank(e.published))) {
       e.published = r;
     }
   }
   return byField;
+}
+
+/** kb/sources evidence_rank: the kind's precedence, then (external) the template first and the sources' priority. */
+function evidenceRank(r: { source_kind: string; source_code: string; source_priority: number | null }): number {
+  const external = r.source_kind !== "external" ? 0 : r.source_code === CAPTURE_SOURCE ? 0 : (r.source_priority ?? 1e6);
+  return SOURCE_RANK[r.source_kind] * 1e7 + external;
 }
 export type Evidence = Awaited<ReturnType<typeof evidenceFor>>;
 

@@ -1,0 +1,732 @@
+{
+ "https://vpic.nhtsa.dot.gov/api/vehicles/GetCanadianVehicleSpecifications/?Year=2019&Make=Kia&Model=Sportage&units=&format=json": {
+  "Count": 3,
+  "Message": "Results returned successfully",
+  "Results": [
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE AWD 4DR SUV"
+     },
+     {
+      "Name": "MYR",
+      "Value": "16"
+     },
+     {
+      "Name": "OL",
+      "Value": "448"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "267"
+     },
+     {
+      "Name": "CW",
+      "Value": "1696"
+     },
+     {
+      "Name": "A",
+      "Value": "116"
+     },
+     {
+      "Name": "B",
+      "Value": "158"
+     },
+     {
+      "Name": "C",
+      "Value": "36"
+     },
+     {
+      "Name": "D",
+      "Value": "91"
+     },
+     {
+      "Name": "E",
+      "Value": "104"
+     },
+     {
+      "Name": "F",
+      "Value": "91"
+     },
+     {
+      "Name": "G",
+      "Value": "90"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "161"
+     },
+     {
+      "Name": "WD",
+      "Value": "59/41"
+     }
+    ]
+   },
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE AWD TURBO 4DR SUV"
+     },
+     {
+      "Name": "MYR",
+      "Value": "16"
+     },
+     {
+      "Name": "OL",
+      "Value": "448"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "267"
+     },
+     {
+      "Name": "CW",
+      "Value": "1813"
+     },
+     {
+      "Name": "A",
+      "Value": "116"
+     },
+     {
+      "Name": "B",
+      "Value": "158"
+     },
+     {
+      "Name": "C",
+      "Value": "36"
+     },
+     {
+      "Name": "D",
+      "Value": "91"
+     },
+     {
+      "Name": "E",
+      "Value": "104"
+     },
+     {
+      "Name": "F",
+      "Value": "91"
+     },
+     {
+      "Name": "G",
+      "Value": "90"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "161"
+     },
+     {
+      "Name": "WD",
+      "Value": "59/41"
+     }
+    ]
+   },
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE FWD 4DR SUV"
+     },
+     {
+      "Name": "MYR",
+      "Value": "16"
+     },
+     {
+      "Name": "OL",
+      "Value": "448"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "267"
+     },
+     {
+      "Name": "CW",
+      "Value": "1631"
+     },
+     {
+      "Name": "A",
+      "Value": "116"
+     },
+     {
+      "Name": "B",
+      "Value": "158"
+     },
+     {
+      "Name": "C",
+      "Value": "36"
+     },
+     {
+      "Name": "D",
+      "Value": "91"
+     },
+     {
+      "Name": "E",
+      "Value": "104"
+     },
+     {
+      "Name": "F",
+      "Value": "91"
+     },
+     {
+      "Name": "G",
+      "Value": "90"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "161"
+     },
+     {
+      "Name": "WD",
+      "Value": "59/41"
+     }
+    ]
+   }
+  ],
+  "SearchCriteria": "Year: 2019; Make: Kia; Model: Sportage; Units: Metric"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/menu/model?year=2019&make=Kia": {
+  "menuItem": [
+   {
+    "text": "Cadenza",
+    "value": "Cadenza"
+   },
+   {
+    "text": "Forte",
+    "value": "Forte"
+   },
+   {
+    "text": "Forte FE",
+    "value": "Forte FE"
+   },
+   {
+    "text": "K900",
+    "value": "K900"
+   },
+   {
+    "text": "Niro",
+    "value": "Niro"
+   },
+   {
+    "text": "Niro Electric",
+    "value": "Niro Electric"
+   },
+   {
+    "text": "Niro FE",
+    "value": "Niro FE"
+   },
+   {
+    "text": "Niro Plug-in Hybrid",
+    "value": "Niro Plug-in Hybrid"
+   },
+   {
+    "text": "Niro Touring",
+    "value": "Niro Touring"
+   },
+   {
+    "text": "Optima",
+    "value": "Optima"
+   },
+   {
+    "text": "Optima FE",
+    "value": "Optima FE"
+   },
+   {
+    "text": "Optima Hybrid",
+    "value": "Optima Hybrid"
+   },
+   {
+    "text": "Optima Plug-in Hybrid",
+    "value": "Optima Plug-in Hybrid"
+   },
+   {
+    "text": "Rio",
+    "value": "Rio"
+   },
+   {
+    "text": "Sedona",
+    "value": "Sedona"
+   },
+   {
+    "text": "Sorento AWD",
+    "value": "Sorento AWD"
+   },
+   {
+    "text": "Sorento FWD",
+    "value": "Sorento FWD"
+   },
+   {
+    "text": "Soul",
+    "value": "Soul"
+   },
+   {
+    "text": "Soul Electric",
+    "value": "Soul Electric"
+   },
+   {
+    "text": "Sportage AWD",
+    "value": "Sportage AWD"
+   },
+   {
+    "text": "Sportage FE AWD",
+    "value": "Sportage FE AWD"
+   },
+   {
+    "text": "Sportage FE FWD",
+    "value": "Sportage FE FWD"
+   },
+   {
+    "text": "Sportage FWD",
+    "value": "Sportage FWD"
+   },
+   {
+    "text": "Stinger AWD",
+    "value": "Stinger AWD"
+   },
+   {
+    "text": "Stinger RWD",
+    "value": "Stinger RWD"
+   }
+  ]
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/menu/options?year=2019&make=Kia&model=Sportage+FWD": {
+  "menuItem": [
+   {
+    "text": "Auto (S6), 4 cyl, 2.4 L",
+    "value": "40107"
+   },
+   {
+    "text": "Auto (S6), 4 cyl, 2.0 L, Turbo",
+    "value": "40109"
+   }
+  ]
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40107": {
+  "id": "40107",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage FWD",
+  "baseModel": "Sportage",
+  "displ": "2.4",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "Front-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "25",
+  "comb08U": "24.9421",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 2WD",
+  "tCharger": "",
+  "eng_dscr": "SIDI"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40109": {
+  "id": "40109",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage FWD",
+  "baseModel": "Sportage",
+  "displ": "2.0",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "Front-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "23",
+  "comb08U": "22.6727",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 2WD",
+  "tCharger": "T",
+  "eng_dscr": "SIDI"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/menu/options?year=2019&make=Kia&model=Sportage+AWD": {
+  "menuItem": [
+   {
+    "text": "Auto (S6), 4 cyl, 2.4 L",
+    "value": "40111"
+   },
+   {
+    "text": "Auto (S6), 4 cyl, 2.0 L, Turbo",
+    "value": "40113"
+   }
+  ]
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40111": {
+  "id": "40111",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage AWD",
+  "baseModel": "Sportage",
+  "displ": "2.4",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "All-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "23",
+  "comb08U": "22.5445",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 4WD",
+  "tCharger": "",
+  "eng_dscr": "SIDI"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40113": {
+  "id": "40113",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage AWD",
+  "baseModel": "Sportage",
+  "displ": "2.0",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "All-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "21",
+  "comb08U": "21.1235",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 4WD",
+  "tCharger": "T",
+  "eng_dscr": "SIDI"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/menu/options?year=2019&make=Kia&model=Sportage+FE+FWD": {
+  "menuItem": {
+   "text": "Auto (S6), 4 cyl, 2.4 L",
+   "value": "40108"
+  }
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40108": {
+  "id": "40108",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage FE FWD",
+  "baseModel": "Sportage",
+  "displ": "2.4",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "Front-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "25",
+  "comb08U": "25.3693",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 2WD",
+  "tCharger": "",
+  "eng_dscr": "SIDI"
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/menu/options?year=2019&make=Kia&model=Sportage+FE+AWD": {
+  "menuItem": {
+   "text": "Auto (S6), 4 cyl, 2.4 L",
+   "value": "40112"
+  }
+ },
+ "https://www.fueleconomy.gov/ws/rest/vehicle/40112": {
+  "id": "40112",
+  "year": "2019",
+  "make": "Kia",
+  "model": "Sportage FE AWD",
+  "baseModel": "Sportage",
+  "displ": "2.4",
+  "cylinders": "4",
+  "trany": "Automatic (S6)",
+  "drive": "All-Wheel Drive",
+  "fuelType": "Regular",
+  "fuelType1": "Regular Gasoline",
+  "atvType": "",
+  "comb08": "22",
+  "comb08U": "22.3397",
+  "range": "0",
+  "VClass": "Small Sport Utility Vehicle 4WD",
+  "tCharger": "",
+  "eng_dscr": "SIDI"
+ },
+ "https://vpic.nhtsa.dot.gov/api/vehicles/GetCanadianVehicleSpecifications/?Year=2016&Make=Kia&Model=Sportage&units=&format=json": {
+  "Count": 3,
+  "Message": "Results returned successfully",
+  "Results": [
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE 4DR SUV LX AWD/EX AWD/EX LUXURY"
+     },
+     {
+      "Name": "MYR",
+      "Value": "11"
+     },
+     {
+      "Name": "OL",
+      "Value": "444"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "264"
+     },
+     {
+      "Name": "CW",
+      "Value": "1554"
+     },
+     {
+      "Name": "A",
+      "Value": "114"
+     },
+     {
+      "Name": "B",
+      "Value": "152"
+     },
+     {
+      "Name": "C",
+      "Value": "33"
+     },
+     {
+      "Name": "D",
+      "Value": "90"
+     },
+     {
+      "Name": "E",
+      "Value": "112"
+     },
+     {
+      "Name": "F",
+      "Value": "89"
+     },
+     {
+      "Name": "G",
+      "Value": "91"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "162"
+     },
+     {
+      "Name": "WD",
+      "Value": "58/42"
+     }
+    ]
+   },
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE 4DR SUV LX/EX FWD"
+     },
+     {
+      "Name": "MYR",
+      "Value": "11"
+     },
+     {
+      "Name": "OL",
+      "Value": "444"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "264"
+     },
+     {
+      "Name": "CW",
+      "Value": "1471"
+     },
+     {
+      "Name": "A",
+      "Value": "114"
+     },
+     {
+      "Name": "B",
+      "Value": "152"
+     },
+     {
+      "Name": "C",
+      "Value": "33"
+     },
+     {
+      "Name": "D",
+      "Value": "90"
+     },
+     {
+      "Name": "E",
+      "Value": "112"
+     },
+     {
+      "Name": "F",
+      "Value": "89"
+     },
+     {
+      "Name": "G",
+      "Value": "91"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "162"
+     },
+     {
+      "Name": "WD",
+      "Value": "58/42"
+     }
+    ]
+   },
+   {
+    "Specs": [
+     {
+      "Name": "Make",
+      "Value": "KIA"
+     },
+     {
+      "Name": "Model",
+      "Value": "SPORTAGE 4DR SUV SX"
+     },
+     {
+      "Name": "MYR",
+      "Value": "11"
+     },
+     {
+      "Name": "OL",
+      "Value": "444"
+     },
+     {
+      "Name": "OW",
+      "Value": "186"
+     },
+     {
+      "Name": "OH",
+      "Value": "165"
+     },
+     {
+      "Name": "WB",
+      "Value": "264"
+     },
+     {
+      "Name": "CW",
+      "Value": "1662"
+     },
+     {
+      "Name": "A",
+      "Value": "114"
+     },
+     {
+      "Name": "B",
+      "Value": "152"
+     },
+     {
+      "Name": "C",
+      "Value": "33"
+     },
+     {
+      "Name": "D",
+      "Value": "90"
+     },
+     {
+      "Name": "E",
+      "Value": "112"
+     },
+     {
+      "Name": "F",
+      "Value": "89"
+     },
+     {
+      "Name": "G",
+      "Value": "91"
+     },
+     {
+      "Name": "TWF",
+      "Value": "161"
+     },
+     {
+      "Name": "TWR",
+      "Value": "162"
+     },
+     {
+      "Name": "WD",
+      "Value": "58/42"
+     }
+    ]
+   }
+  ],
+  "SearchCriteria": "Year: 2016; Make: Kia; Model: Sportage; Units: Metric"
+ }
+}

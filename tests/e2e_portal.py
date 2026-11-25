@@ -44,6 +44,7 @@ from vehicle_scraper.storage import Storage  # noqa: E402
 ADMIN_URL = os.getenv("OMNIBASE_E2E_ADMIN_URL", "postgresql://postgres:test@localhost:55441/postgres")
 DB = os.getenv("OMNIBASE_E2E_DB", "omnibase_e2e")
 PORTAL_ROLE, PORTAL_PASSWORD = "omnibase_portal_e2e", "e2e"
+SOURCES_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sources" / "kia_sportage.json"
 ROLE_SQL = ROOT / "docs" / "sql" / "portal_role.sql"
 READY = "e2e worker ready"
 
@@ -115,6 +116,8 @@ def setup() -> str:
             for email, role in USERS.items():
                 conn.execute("INSERT INTO kb.app_user (email, name, role) VALUES (%s, %s, %s)",
                              (email, role.capitalize(), role))
+            # the seed's cars are Colombian: let vPIC apply everywhere so the generation page offers it
+            conn.execute("UPDATE kb.external_source SET countries = '{}' WHERE code = 'vpic_canada'")
             grant_portal_role(conn)
     log.info("e2e database %s ready; the portal connects as %s", DB, PORTAL_ROLE)
     return owner
@@ -128,6 +131,8 @@ def main() -> int:
     owner = setup()
     if args.setup_only:
         return 0
+    # external sources answer from saved responses (a 2016/2019 Kia Sportage), never the network
+    os.environ["KB_SOURCES_FIXTURES"] = str(SOURCES_FIXTURE)
     with psycopg.connect(owner, autocommit=True) as conn:
         print(READY, flush=True)
         run_worker(conn, poll=2.0)

@@ -23,7 +23,8 @@ Run after ``kb clean``. In one transaction under the writer lock:
    entity keeps its accepted listing values (a different majority opens ``spec_disagreement``);
    only its empty fields fill.
 6. **Publish**: each level column gets its best accepted evidence (manual > external >
-   listings > ai). Columns are derived: change a value through evidence, not by hand.
+   listings > ai; among external values the capture template first, then the sources'
+   priority, ``kb/sources``). Columns are derived: change a value through evidence, not by hand.
 7. **Proposals** for a person: ``generation_split`` (the engine changes between years) and
    ``evolution_note`` (an equipment field flips from a year on).
 8. **Final records** (``kb/final.py``): ``kb.final_listing``, what each in-scope listing
@@ -45,8 +46,9 @@ from .final import write_final
 from .identity import compact_key
 from .levels import (BOOLEAN, EQUIP_MIN_AGREEMENT, EQUIP_MIN_SUPPORT, EQUIPMENT_FIELDS, EVOLUTION_MIN_SUPPORT,
                      GENERATION_COLUMNS, GENERATION_FROM_LISTINGS, MECH_DISAGREEMENT, POWERTRAIN_COLUMNS,
-                     LISTING_FIELD_OF, POWERTRAIN_FROM_LISTINGS, RANGES, SOURCE_RANK, VARIANT_COLUMNS,
+                     LISTING_FIELD_OF, POWERTRAIN_FROM_LISTINGS, RANGES, VARIANT_COLUMNS,
                      VARIANT_FROM_LISTINGS)
+from .sources import UNRANKED, evidence_rank, external_ranks
 from .vehicle import write_identities
 
 BUILD_ISSUES = ("generation_split", "year_outside_generation", "spec_disagreement", "evolution_note")
@@ -257,7 +259,7 @@ FROM kb.review_item WHERE issue = 'spec_disagreement' AND status IN ('approved',
         cur.execute("""
 INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status, detail)
 VALUES (%s, %s, %s, 'manual', %s, 'accepted', %s)
-ON CONFLICT (entity_type, entity_id, field, source_kind) DO NOTHING""",
+ON CONFLICT (entity_type, entity_id, field, source_kind, source_code) DO NOTHING""",
                     (etype, eid, fname, json.dumps(value), json.dumps({"review_item_id": case_id})))
     # Approved evolution notes.
     for case_id, vid, fname, status, proposed, corrected in _load(cur, """
@@ -507,11 +509,15 @@ SELECT entity_type, entity_id, field, value, support, agreement, detail FROM kb.
 WHERE source_kind = 'listings' AND status = 'accepted'"""):
             if (etype, eid) in verified:
                 frozen[(etype, eid, f)] = (value, support, agreement, detail)
-        # A source's value (`kb specs import`) that the listings contradict by more than 10 %
-        # opens a spec_disagreement; the source's value stays published meanwhile.
-        external = {(etype, eid, f): value for etype, eid, f, value in _load(cur, """
-SELECT entity_type, entity_id, field, value FROM kb.spec_evidence
-WHERE source_kind = 'external' AND status = 'accepted'""")}
+        # A source's value (the capture template or an external source) that the listings
+        # contradict by more than 10 % opens a spec_disagreement; the published external value
+        # (captura first, then the sources' priority) stays published meanwhile.
+        ranks = external_ranks(cur)
+        external: dict[tuple, object] = {}
+        for etype, eid, f, code, value in sorted(_load(cur, """
+SELECT entity_type, entity_id, field, source_code, value FROM kb.spec_evidence
+WHERE source_kind = 'external' AND status = 'accepted'"""), key=lambda r: -ranks.get(r[3], UNRANKED)):
+            external[(etype, eid, f)] = value                  # the best-ranked source is written last
         evidence = []
         voting = {"generation": GENERATION_FROM_LISTINGS, "powertrain": POWERTRAIN_FROM_LISTINGS,
                   "variant": VARIANT_FROM_LISTINGS}
@@ -550,9 +556,10 @@ WHERE source_kind = 'external' AND status = 'accepted'""")}
 
         # 6. publish ------------------------------------------------------------------------------
         best: dict[tuple, tuple] = {}
-        for etype, eid, fname, kind, value in _load(cur, """
-SELECT entity_type, entity_id, field, source_kind, value FROM kb.spec_evidence WHERE status = 'accepted'"""):
-            rank = SOURCE_RANK[kind]
+        for etype, eid, fname, kind, code, value in _load(cur, """
+SELECT entity_type, entity_id, field, source_kind, source_code, value FROM kb.spec_evidence
+WHERE status = 'accepted'"""):
+            rank = evidence_rank(kind, code, ranks)
             k = (etype, eid, fname)
             if k not in best or rank < best[k][0]:
                 best[k] = (rank, value, kind)

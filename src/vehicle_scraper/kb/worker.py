@@ -11,7 +11,9 @@ queued action, oldest first and one at a time:
    the portal). A failed action changes nothing.
 
 ``recalculate`` runs ``kb clean`` + ``kb build``: it is marked ``running`` first (committed),
-so the portal can show it, and decisions queued meanwhile wait.
+so the portal can show it, and decisions queued meanwhile wait. ``source_lookup`` (query an
+external source for one generation, ``kb/sources``) runs the same way, its requests outside any
+transaction; it writes nothing, its proposal goes in the result for ``source_apply``.
 
 LISTEN/NOTIFY on ``kb_web_action`` wakes the worker at once; ``poll`` seconds is the fallback.
 """
@@ -22,7 +24,9 @@ import binascii
 import json
 import logging
 import re
+import os
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -34,7 +38,8 @@ log = logging.getLogger(__name__)
 
 ROLE_RANK = {"lector": 0, "revisor": 1, "editor": 2}
 # everything else needs "editor"
-REQUIRED_ROLE = {"decide_case": "revisor", "export_specs": "revisor", "import_specs": "revisor"}
+REQUIRED_ROLE = {"decide_case": "revisor", "export_specs": "revisor", "import_specs": "revisor",
+                 "source_lookup": "revisor", "source_apply": "revisor"}
 SPECS_MAX_BYTES = 700 * 1024                         # an uploaded template (the portal says the same)
 SPECS_MAX_LIMIT = 2000                               # rows per sheet in a template prepared from the portal
 SPECS_MAX_ERRORS = 200                               # row errors kept on the action
@@ -143,7 +148,7 @@ def _set_value(cur, p: dict, email: str) -> dict:
         cur.execute("""
 INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status, detail)
 VALUES (%s, %s, %s, 'manual', %s, 'accepted', %s)
-ON CONFLICT (entity_type, entity_id, field, source_kind) DO UPDATE SET value = EXCLUDED.value,
+ON CONFLICT (entity_type, entity_id, field, source_kind, source_code) DO UPDATE SET value = EXCLUDED.value,
     status = 'accepted', detail = EXCLUDED.detail, updated_at = now()""",
                     (etype, eid, field_name, json.dumps(value),
                      json.dumps({"by": email, "note": p.get("note")})))
@@ -309,12 +314,219 @@ def _import_specs(cur, p: dict, email: str) -> dict:
             "note": "los valores se publican al recalcular"}
 
 
+# --- external sources (kb/sources, migration 0017) -------------------------------------------
+LOOKUP_FIELDS = {"generation": set(GENERATION_COLUMNS), "powertrain": set(POWERTRAIN_COLUMNS)}
+
+
+def _external_source(cur, code) -> dict:
+    cur.execute("SELECT code, name, credit, paid, active, countries FROM kb.external_source WHERE code = %s",
+                (str(code or ""),))
+    row = cur.fetchone()
+    if not row:
+        raise ActionError(f"no existe la fuente {code!r}")
+    return dict(zip(("code", "name", "credit", "paid", "active", "countries"), row))
+
+
+def lookup_target(cur, generation_id: int, source: dict):
+    """The generation and its powertrains as the source sees them: only variants with listings
+    sold in the source's countries (all when it lists none) count, and their sale years are the
+    years asked."""
+    from .sources import PowertrainTarget, Target
+    cur.execute("""
+SELECT g.id, k.name, m.name, g.body_style_code, g.year_from, g.year_to, g.observed_year_from, g.observed_year_to
+FROM kb.generation g JOIN kb.model m ON m.id = g.model_id JOIN kb.make k ON k.id = m.make_id
+WHERE g.id = %s""", (generation_id,))
+    row = cur.fetchone()
+    if not row:
+        raise ActionError(f"no existe la generación {generation_id}")
+    countries = list(source["countries"] or [])
+    cur.execute("""
+SELECT v.powertrain_id, v.sale_year_from, v.sale_year_to, p.engine_displacement_l, p.engine_cylinders,
+       p.fuel_type_code, p.transmission_type_code, p.drivetrain_code
+FROM kb.commercial_variant v JOIN kb.powertrain p ON p.id = v.powertrain_id
+WHERE v.generation_id = %s AND v.status <> 'rejected' AND p.status <> 'rejected' AND v.listings > 0
+  AND (cardinality(%s::text[]) = 0 OR v.country_code = ANY(%s::text[]))
+ORDER BY v.powertrain_id""", (generation_id, countries, countries))
+    pts: dict = {}
+    for pid, y0, y1, disp, cyl, fuel, trans, drive in cur.fetchall():
+        pt = pts.setdefault(pid, PowertrainTarget(pid, float(disp) if disp is not None else None, cyl, fuel,
+                                                  trans, drive, []))
+        if y0 and y1:
+            pt.years = sorted(set(pt.years) | set(range(int(y0), int(y1) + 1)))
+    if not pts:
+        where = ", ".join(countries) if countries else "ningún país"
+        raise ActionError(f"la generación no tiene variantes con anuncios en {where}: la fuente no aplica")
+    years = sorted({y for pt in pts.values() for y in pt.years})
+    if not years:
+        y0, y1 = (row[4] or row[6]), (row[5] or row[7])
+        years = list(range(int(y0), int(y1) + 1)) if y0 and y1 else []
+    return Target(row[0], row[1], row[2], row[3], years, list(pts.values()))
+
+
+def _best(cur, entity_type: str, entity_id: int, field_name: str):
+    """The field's best accepted evidence (kind, source code, value), or None."""
+    from .sources import evidence_rank, external_ranks
+    cur.execute("SELECT source_kind, source_code, value FROM kb.spec_evidence WHERE entity_type = %s "
+                "AND entity_id = %s AND field = %s AND status = 'accepted'", (entity_type, entity_id, field_name))
+    rows = cur.fetchall()
+    ranks = external_ranks(cur)
+    rows.sort(key=lambda r: evidence_rank(r[0], r[1], ranks))
+    return rows[0] if rows else None
+
+
+class FixtureClient:
+    """Saved answers instead of the network (``KB_SOURCES_FIXTURES``: a JSON file url -> body),
+    for the end-to-end tests. A url that isn't there fails like an unreachable source."""
+
+    def __init__(self, path: str):
+        self.answers = json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def get(self, url: str, **kw):
+        if url not in self.answers:
+            raise RuntimeError(f"sin respuesta guardada para {url}")
+        body = self.answers[url]
+
+        class _Response:
+            def json(self):
+                return body
+        return _Response()
+
+    def close(self) -> None:
+        pass
+
+
+def make_client():
+    """The HTTP client for external sources: the polite one (robots.txt, delays, retries), or
+    saved answers when ``KB_SOURCES_FIXTURES`` is set (tests only)."""
+    fixtures = os.getenv("KB_SOURCES_FIXTURES")
+    if fixtures:
+        return FixtureClient(fixtures)
+    from ..http import PoliteClient
+    return PoliteClient()
+
+
+def source_lookup(conn, payload: dict, email: str) -> dict:
+    """Query a source for one generation; nothing is written (the proposal is the result)."""
+    from .sources import adapters
+    with conn.transaction(), conn.cursor() as cur:
+        source = _external_source(cur, payload.get("source"))
+        if not source["active"]:
+            raise ActionError(f"la fuente {source['name']} está desactivada")
+        if source["paid"]:
+            raise ActionError("las fuentes de pago no se consultan desde el portal")
+        target = lookup_target(cur, _int(payload, "generation_id"), source)
+    adapter = adapters().get(source["code"])
+    if adapter is None:
+        raise ActionError(f"la fuente {source['code']} no tiene código para consultarla")
+    client = make_client()
+    try:
+        proposals, notes = adapter(client, target)
+    except Exception as e:  # noqa: BLE001 - network, robots.txt or an answer we can't read
+        raise ActionError(f"no se pudo consultar {source['name']}: {(str(e).splitlines() or [type(e).__name__])[0]}")
+    finally:
+        client.close()
+    proposals = [p for p in proposals if p.field in LOOKUP_FIELDS[p.entity_type]]
+    out = []
+    with conn.transaction(), conn.cursor() as cur:
+        for p in proposals:
+            cur.execute(f"SELECT {p.field} FROM {TABLES[p.entity_type]} WHERE id = %s", (p.entity_id,))
+            value = cur.fetchone()[0]
+            value = float(value) if isinstance(value, Decimal) else value
+            best = _best(cur, p.entity_type, p.entity_id, p.field)
+            out.append({**p.as_dict(), "current": {
+                "value": value, "source_kind": best[0] if best else None, "source_code": best[1] if best else None}})
+    return {"source": source["code"], "source_name": source["name"], "credit": source["credit"],
+            "generation_id": target.generation_id, "years": target.years,
+            "powertrains": [pt.id for pt in target.powertrains], "notes": notes, "proposals": out}
+
+
+def publish_fields(cur, entity_type: str, entity_id: int, fields) -> dict:
+    """Write each field's best accepted evidence into its level column now (as kb build would)."""
+    out = {}
+    for f in fields:
+        best = _best(cur, entity_type, entity_id, f)
+        value = best[2] if best else None
+        cur.execute(f"UPDATE {TABLES[entity_type]} SET {f} = %s, updated_at = now() WHERE id = %s",
+                    (value, entity_id))
+        out[f] = value
+    return out
+
+
+def _source_apply(cur, p: dict, email: str) -> dict:
+    """Save what a person accepted from a lookup: the values come from the lookup's result
+    (never from the request), as that source's accepted external evidence, published at once."""
+    lookup_id = _int(p, "lookup_id")
+    cur.execute("SELECT result FROM kb.web_action WHERE id = %s AND kind = 'source_lookup' AND status = 'applied'",
+                (lookup_id,))
+    row = cur.fetchone()
+    if not row or not row[0]:
+        raise ActionError(f"la consulta {lookup_id} no existe o no terminó")
+    result = row[0]
+    source = _external_source(cur, result.get("source"))
+    if not source["active"]:
+        raise ActionError(f"la fuente {source['name']} está desactivada")
+    gen_id = int(result["generation_id"])
+    cur.execute("SELECT id FROM kb.powertrain WHERE generation_id = %s", (gen_id,))
+    owned = {("generation", gen_id)} | {("powertrain", r[0]) for r in cur.fetchall()}
+    proposals = {(q["entity_type"], int(q["entity_id"]), q["field"]): q for q in result.get("proposals") or []}
+    accept = p.get("accept")
+    if not isinstance(accept, list) or not accept:
+        raise ActionError("no se marcó ningún valor para aceptar")
+    by_entity: dict = {}
+    for a in accept:
+        try:
+            key = (a["entity_type"], int(a["entity_id"]), a["field"])
+        except (KeyError, TypeError, ValueError):
+            raise ActionError("un valor aceptado no es válido")
+        q = proposals.get(key)
+        if q is None or key[:2] not in owned or key[2] not in LOOKUP_FIELDS.get(key[0], ()):
+            raise ActionError(f"{key[2]} no está en la consulta {lookup_id}")
+        value = _value(cur, key[2], q["value"])
+        detail = {"source": source["name"], "credit": source["credit"], "accepted_by": email,
+                  "lookup_id": lookup_id, "records": q.get("records"), "years": q.get("years"),
+                  "matched": (q.get("matched") or [])[:10], "alternatives": q.get("alternatives") or {}}
+        cur.execute("""
+INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, source_code, value, status, support, detail)
+VALUES (%s, %s, %s, 'external', %s, %s, 'accepted', %s, %s)
+ON CONFLICT (entity_type, entity_id, field, source_kind, source_code) DO UPDATE SET value = EXCLUDED.value,
+    status = 'accepted', support = EXCLUDED.support, detail = EXCLUDED.detail, updated_at = now()""",
+                    (key[0], key[1], key[2], source["code"], json.dumps(value), int(q.get("records") or 0),
+                     json.dumps(detail)))
+        by_entity.setdefault(key[:2], []).append(key[2])
+    published = {f"{etype}:{eid}": publish_fields(cur, etype, eid, fields) for (etype, eid), fields in by_entity.items()}
+    return {"saved": sum(len(f) for f in by_entity.values()), "published": published, "source": source["code"],
+            "generation_id": gen_id, "note": "publicado en la generación y sus trenes motrices; las fichas, al recalcular"}
+
+
+def _source_update(cur, p: dict, email: str) -> dict:
+    source = _external_source(cur, p.get("code"))
+    countries = p.get("countries")
+    if not isinstance(countries, list):
+        raise ActionError("países: una lista de códigos (vacía = todos)")
+    countries = sorted({str(c).strip().upper() for c in countries if str(c).strip()})
+    cur.execute("SELECT code FROM kb.country WHERE code = ANY(%s)", (countries,))
+    unknown = set(countries) - {r[0] for r in cur.fetchall()}
+    if unknown:
+        raise ActionError(f"países que no están en el catálogo: {', '.join(sorted(unknown))}")
+    priority = _int(p, "priority")
+    if not 1 <= priority <= 1000:
+        raise ActionError("prioridad: entre 1 y 1000 (menor gana)")
+    active = bool(p.get("active"))
+    cur.execute("UPDATE kb.external_source SET active = %s, countries = %s, priority = %s, updated_by = %s, "
+                "updated_at = now() WHERE code = %s", (active, countries, priority, email, source["code"]))
+    return {"code": source["code"], "active": active, "countries": countries, "priority": priority,
+            "note": "una prioridad nueva cambia lo publicado al recalcular"}
+
+
 HANDLERS: dict[str, Callable] = {
     "decide_case": _decide_case, "set_value": _set_value, "split_generation": _split_generation,
     "merge_generations": _merge_generations, "add_evolution_note": _add_evolution_note,
     "catalog_upsert": _catalog_upsert, "user_upsert": _user_upsert,
     "export_specs": _export_specs, "import_specs": _import_specs,
+    "source_apply": _source_apply, "source_update": _source_update,
 }
+# Run outside the claim's transaction, marked "running" first (see process_one).
+DEFERRED = {"recalculate", "source_lookup"}
 
 
 # --- the loop -------------------------------------------------------------------------------
@@ -336,7 +548,7 @@ def _allowed(cur, kind: str, email: str) -> Optional[str]:
 
 def process_one(conn) -> Optional[dict]:
     """Apply the oldest queued action. Returns {id, kind, status} or None when the queue is empty."""
-    recalc = None
+    deferred = None
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT id, kind, payload, requested_by FROM kb.web_action WHERE status = 'queued' "
                     "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED")
@@ -348,14 +560,17 @@ def process_one(conn) -> Optional[dict]:
         if denied:
             _finish(cur, action_id, "failed", error=denied)
             return {"id": action_id, "kind": kind, "status": "failed", "error": denied}
-        if kind == "recalculate":
+        if kind in DEFERRED:
             cur.execute("UPDATE kb.web_action SET status = 'running' WHERE id = %s", (action_id,))
-            recalc = action_id
+            deferred = (action_id, kind, payload or {}, email)
         else:
             take_writer_lock(cur)
             try:
+                handler = HANDLERS.get(kind)
+                if handler is None:          # a newer portal than this worker: say so, not a bare KeyError
+                    raise ActionError(f"este worker no conoce la acción {kind!r}: reinícialo con la versión actual")
                 with conn.transaction():
-                    result = HANDLERS[kind](cur, payload or {}, email)
+                    result = handler(cur, payload or {}, email)
                 _finish(cur, action_id, "applied", result=result)
                 return {"id": action_id, "kind": kind, "status": "applied", "result": result}
             except Exception as e:  # noqa: BLE001 - any error fails only this action, never the queue
@@ -366,18 +581,24 @@ def process_one(conn) -> Optional[dict]:
                     message = (str(e).splitlines() or [type(e).__name__])[0]
                 _finish(cur, action_id, "failed", error=message)
                 return {"id": action_id, "kind": kind, "status": "failed", "error": message}
-    # recalculate: clean + build, each in its own transaction, outside the claim above
-    from .build import build
-    from .clean import clean
+    action_id, kind, payload, email = deferred
     try:
-        summary = {"clean": clean(conn), "build": build(conn)}
+        if kind == "recalculate":
+            # clean + build, each in its own transaction, outside the claim above
+            from .build import build
+            from .clean import clean
+            summary = {"clean": clean(conn), "build": build(conn)}
+        else:
+            summary = source_lookup(conn, payload, email)
         status, error = "applied", None
+    except ActionError as e:
+        summary, status, error = None, "failed", str(e)
     except Exception as e:  # noqa: BLE001 - reported on the action, the worker keeps running
-        log.exception("recalculation %s failed", recalc)
-        summary, status, error = None, "failed", str(e).splitlines()[0]
+        log.exception("%s %s failed", kind, action_id)
+        summary, status, error = None, "failed", (str(e).splitlines() or [type(e).__name__])[0]
     with conn.transaction(), conn.cursor() as cur:
-        _finish(cur, recalc, status, result=summary, error=error)
-    return {"id": recalc, "kind": "recalculate", "status": status, "error": error}
+        _finish(cur, action_id, status, result=summary, error=error)
+    return {"id": action_id, "kind": kind, "status": status, "error": error}
 
 
 def drain(conn) -> list[dict]:

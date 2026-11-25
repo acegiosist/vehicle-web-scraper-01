@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/base", label: "Base" },
   { href: "/fichas", label: "Fichas" },
   { href: "/captura", label: "Captura" },
+  { href: "/fuentes", label: "Fuentes" },
   { href: "/catalogos", label: "Catálogos" },
   { href: "/acciones", label: "Acciones" },
   { href: "/usuarios", label: "Usuarios" },

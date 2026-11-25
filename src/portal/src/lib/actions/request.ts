@@ -14,7 +14,10 @@ import {
   evolutionNoteSchema,
   exportSpecsSchema,
   mergeGenerationsSchema,
+  parseAccepted,
   setValueSchema,
+  sourceLookupSchema,
+  sourceUpdateSchema,
   splitGenerationSchema,
   userUpsertSchema,
 } from "./schemas";
@@ -93,6 +96,30 @@ export async function importSpecs(_prev: RequestState, form: FormData): Promise<
   const data = Buffer.from(await f.arrayBuffer());
   if (data.subarray(0, 2).toString("latin1") !== "PK") return { status: "error", error: "No es un archivo .xlsx válido." };
   return queue("import_specs", { file_name: f.name.slice(0, 120), file_b64: data.toString("base64") });
+}
+
+/** Ask a source about one generation; the worker answers in the action's result (nothing is saved). */
+export async function lookupSource(_prev: RequestState, form: FormData): Promise<RequestState> {
+  return parseAndQueue("source_lookup", sourceLookupSchema, form);
+}
+
+/** Save the values ticked in the comparison; the worker takes them from the lookup, not from here. */
+export async function applySource(_prev: RequestState, form: FormData): Promise<RequestState> {
+  const lookupId = Number(form.get("lookup_id"));
+  if (!Number.isInteger(lookupId) || lookupId <= 0) return { status: "error", error: "Consulta inválida." };
+  const accept = parseAccepted(form.getAll("accept"));
+  if (typeof accept === "string") return { status: "error", error: accept };
+  const generationId = Number(form.get("generation_id"));
+  // generation_id only lets the generation page find this request; the worker uses the lookup's
+  return queue("source_apply", {
+    lookup_id: lookupId,
+    ...(Number.isInteger(generationId) && generationId > 0 ? { generation_id: generationId } : {}),
+    accept,
+  });
+}
+
+export async function updateSource(_prev: RequestState, form: FormData): Promise<RequestState> {
+  return parseAndQueue("source_update", sourceUpdateSchema, form);
 }
 
 export async function recalculate(_prev: RequestState, _form: FormData): Promise<RequestState> {

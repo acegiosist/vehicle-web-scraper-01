@@ -13,8 +13,9 @@ A person fills the gaps from a source (a maker's sheet, a magazine) and writes i
 (required on every row that changes something). Import reads the file back:
 
 * a value different from the current one becomes **external evidence, accepted**, with the
-  source, the person and the note in its ``detail``: it beats the listings and loses to a manual
-  value (``levels.SOURCE_RANK``). Importing again replaces the earlier external value;
+  source, the person and the note in its ``detail`` and ``source_code = 'captura'``: it beats
+  the listings and the automatic sources (``kb/sources``) and loses to a manual value
+  (``levels.SOURCE_RANK``). Importing again replaces the earlier captured value;
 * blank cells and unchanged values do nothing (a blank never deletes);
 * the cycle is the generation's identity, so a different cycle opens a ``generation_cycle``
   case instead (migration 0014); listings move only after a person approves it;
@@ -281,9 +282,10 @@ def _import_sheet(cur, table_rows: list, sheet: str, by: str, file: str, stats: 
                   **({"note": str(cell(row, "nota")).strip()} if not _blank(cell(row, "nota")) else {})}
         for column, value in changes.items():
             cur.execute("""
-INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status, support, detail)
-VALUES (%s, %s, %s, 'external', %s, 'accepted', 0, %s)
-ON CONFLICT (entity_type, entity_id, field, source_kind) DO UPDATE SET
+INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, source_code, value, status, support,
+                              detail)
+VALUES (%s, %s, %s, 'external', 'captura', %s, 'accepted', 0, %s)
+ON CONFLICT (entity_type, entity_id, field, source_kind, source_code) DO UPDATE SET
     value = EXCLUDED.value, status = 'accepted', detail = EXCLUDED.detail, updated_at = now()""",
                         (entity_type, eid, column, json.dumps(value), json.dumps(detail)))
             stats[f"{entity_type}_values"] += 1

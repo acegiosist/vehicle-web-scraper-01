@@ -167,5 +167,15 @@ export const SOURCE_LABELS: Record<string, string> = {
   listings: "Anuncios",
   ai: "IA",
 };
+/** kb/sources CAPTURE: what the capture template saved, first among external values. */
+export const CAPTURE_SOURCE = "captura";
+
+/** "Manual", "Anuncios", "Fuente externa · Captura", "Fuente externa · fueleconomy.gov (EPA / DOE)". */
+export function sourceLabel(kind: string, code?: string | null, name?: string | null): string {
+  const label = SOURCE_LABELS[kind] ?? kind;
+  if (kind !== "external" || !code) return label;
+  return `${label} · ${code === CAPTURE_SOURCE ? "Captura" : (name ?? code)}`;
+}
+
 /** kb/levels.py SOURCE_RANK: the published value is the best accepted evidence. */
 export const SOURCE_RANK: Record<string, number> = { manual: 0, external: 1, listings: 2, ai: 3 };

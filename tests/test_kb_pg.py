@@ -8,6 +8,7 @@ a throwaway database (never omnibase itself: the tests drop and recreate the sch
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -694,6 +695,90 @@ def test_worker_capture_template(conn, tmp_path):
     assert q(conn, "SELECT length_mm FROM kb.generation") == [(4300,)]
 
 
+
+SOURCES_FIXTURE = Path(__file__).parent / "fixtures" / "sources" / "kia_sportage.json"
+
+
+def sportage(listing_id, disp, drive, *, site="driveway", year=2019):
+    return rec(site=site, listing_id=listing_id, make="Kia", model="Sportage", trim="LX", model_year=year,
+               engine_displacement_l=disp, fuel_type="Gasoline", transmission_type="Automatic", drivetrain=drive,
+               body_style="SUV")
+
+
+def test_worker_external_sources(conn, tmp_path, monkeypatch):
+    monkeypatch.setenv("KB_SOURCES_FIXTURES", str(SOURCES_FIXTURE))       # saved answers, no network
+    built(conn, tmp_path, [sportage(f"us{i}", 2.4, "FWD") for i in range(5)]
+          + [sportage(f"co{i}", 2.0, "AWD", site="carroya") for i in range(5)])
+    users(conn, ana="revisor", leo="lector", eva="editor")
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    us = q(conn, "SELECT id FROM kb.powertrain WHERE engine_displacement_l = 2.4")[0][0]
+    co = q(conn, "SELECT id FROM kb.powertrain WHERE engine_displacement_l = 2.0")[0][0]
+    request(conn, "set_value", {"entity_type": "generation", "entity_id": gid, "field": "width_mm", "value": "1900"},
+            "eva@x.co")
+    denied = request(conn, "source_lookup", {"generation_id": gid, "source": "vpic_canada"}, "leo@x.co")
+    dims = request(conn, "source_lookup", {"generation_id": gid, "source": "vpic_canada"}, "ana@x.co")
+    economy = request(conn, "source_lookup", {"generation_id": gid, "source": "fueleconomy"}, "ana@x.co")
+    drain(conn)
+    assert "revisor" in action(conn, denied)[1]
+    status, _, result = action(conn, dims)
+    assert status == "applied" and result["credit"].startswith("NHTSA")
+    got = {p["field"]: (p["value"], p["current"]) for p in result["proposals"]}
+    assert got["length_mm"] == (4480, {"value": None, "source_kind": None, "source_code": None})
+    assert got["width_mm"] == (1860, {"value": 1900, "source_kind": "manual", "source_code": ""})
+    # fueleconomy applies to the US by default: only the powertrain sold there is asked about
+    status, _, result = action(conn, economy)
+    assert status == "applied" and result["powertrains"] == [us] and result["years"] == [2019]
+    assert {(p["entity_id"], p["field"]): p["value"] for p in result["proposals"]} == {
+        (us, "fuel_economy_kml"): 10.6, (us, "gears"): 6, (us, "engine_cylinders"): 4}
+    assert q(conn, "SELECT count(*) FROM kb.spec_evidence WHERE source_kind = 'external'") == [(0,)]   # a lookup writes nothing
+
+    def accept(lookup, *keys):
+        return request(conn, "source_apply", {"lookup_id": lookup, "accept": [
+            {"entity_type": e, "entity_id": i, "field": f} for e, i, f in keys]}, "ana@x.co")
+    a1 = accept(dims, ("generation", gid, "length_mm"), ("generation", gid, "width_mm"))
+    a2 = accept(economy, ("powertrain", co, "fuel_economy_kml"))              # not in that lookup: refused
+    a3 = accept(economy, ("powertrain", us, "fuel_economy_kml"), ("powertrain", us, "gears"))
+    a4 = accept(denied, ("generation", gid, "length_mm"))                     # that lookup failed
+    drain(conn)
+    assert action(conn, a1)[0] == "applied" and action(conn, a1)[2]["saved"] == 2
+    assert "no está en la consulta" in action(conn, a2)[1] and "no terminó" in action(conn, a4)[1]
+    assert action(conn, a3)[0] == "applied"
+    # published at once; the manual width still wins over the source's
+    assert q(conn, "SELECT length_mm, width_mm FROM kb.generation WHERE id = %s", gid) == [(4480, 1900)]
+    assert q(conn, "SELECT fuel_economy_kml, gears FROM kb.powertrain WHERE id = %s", us) == [(Decimal("10.60"), 6)]
+    assert q(conn, "SELECT source_code, detail->>'accepted_by', detail->>'credit', support FROM kb.spec_evidence "
+                   "WHERE field = 'gears'") == [("fueleconomy", "ana@x.co", "Courtesy of FuelEconomy.gov, U.S. Dept. of "
+                                                 "Energy", 2)]
+    # kb build publishes the same; what a person captured in the template wins among external values
+    build(conn)
+    assert q(conn, "SELECT length_mm, width_mm FROM kb.generation WHERE id = %s", gid) == [(4480, 1900)]
+    conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, source_code, value, status) "
+                 "VALUES ('generation', %s, 'length_mm', 'external', 'captura', '4400', 'accepted')", (gid,))
+    build(conn)
+    assert q(conn, "SELECT length_mm FROM kb.generation WHERE id = %s", gid) == [(4400,)]
+    assert q(conn, "SELECT length_mm FROM kb.vehicle_identity WHERE generation_id = %s LIMIT 1", gid) == [(4400,)]
+
+    # the registry: editors only; countries must be in the catalog; a deactivated source isn't asked
+    b1 = request(conn, "source_update", {"code": "vpic_canada", "active": False, "countries": [], "priority": 5},
+                 "ana@x.co")
+    b2 = request(conn, "source_update", {"code": "fueleconomy", "active": True, "countries": ["XX"], "priority": 20},
+                 "eva@x.co")
+    b3 = request(conn, "source_update", {"code": "vpic_canada", "active": False, "countries": ["co", "US"],
+                                         "priority": 5}, "eva@x.co")
+    b4 = request(conn, "source_update", {"code": "fueleconomy", "active": True, "countries": ["GT"], "priority": 20},
+                 "eva@x.co")
+    b5 = request(conn, "source_lookup", {"generation_id": gid, "source": "vpic_canada"}, "ana@x.co")
+    b6 = request(conn, "source_lookup", {"generation_id": gid, "source": "fueleconomy"}, "ana@x.co")
+    drain(conn)
+    assert "editor" in action(conn, b1)[1] and "XX" in action(conn, b2)[1]
+    assert action(conn, b3)[0] == action(conn, b4)[0] == "applied"
+    assert q(conn, "SELECT active, countries, priority, updated_by FROM kb.external_source WHERE code = 'vpic_canada'")         == [(False, ["CO", "US"], 5, "eva@x.co")]
+    assert "desactivada" in action(conn, b5)[1] and "no aplica" in action(conn, b6)[1]
+    conn.execute("UPDATE kb.external_source SET paid = true, countries = '{}' WHERE code = 'fueleconomy'")
+    b7 = request(conn, "source_lookup", {"generation_id": gid, "source": "fueleconomy"}, "ana@x.co")
+    drain(conn)
+    assert "de pago" in action(conn, b7)[1]
+
 def test_worker_edits(conn, tmp_path):
     built(conn, tmp_path, [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(5)])
     users(conn, eva="editor")
@@ -861,8 +946,9 @@ def test_vehicle_identity_consolidates_the_levels(conn, tmp_path):
     limited = q(conn, "SELECT id FROM kb.commercial_variant WHERE trim_name = 'Limited'")[0][0]
     for etype, eid, field, kind, value in [("generation", gid, "length_mm", "manual", "4300"),
                                            ("powertrain", pid, "torque_nm", "external", "151")]:
-        conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status) "
-                     "VALUES (%s, %s, %s, %s, %s, 'accepted')", (etype, eid, field, kind, value))
+        conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, source_code, value, "
+                     "status) VALUES (%s, %s, %s, %s, %s, %s, 'accepted')",
+                     (etype, eid, field, kind, "captura" if kind == "external" else "", value))
     conn.execute("INSERT INTO kb.evolution_note (variant_id, field, value, year_from, source, note) "
                  "VALUES (%s, 'headlight_type_code', '\"LED\"', 2018, 'manual', 'facelift')", (a,))
     # a provisional variant without listings (they moved elsewhere) gets no sheet

@@ -101,6 +101,41 @@ export function checkSpecsFile(file: { name: string; size: number } | null): str
   return null;
 }
 
+/** Ask an external source about one generation (kb/sources; the worker checks scope and status). */
+export const sourceLookupSchema = z.object({
+  generation_id: id,
+  source: z.string().regex(/^[a-z0-9_]+$/, "Elige una fuente"),
+});
+
+/** The values a person accepted from a lookup: "entity_type:entity_id:field" each. */
+export const ACCEPT_KEY = /^(generation|powertrain):(\d+):([a-z0-9_]+)$/;
+export const SOURCE_APPLY_MAX = 200;
+
+export function parseAccepted(values: unknown[]): { entity_type: string; entity_id: number; field: string }[] | string {
+  const keys = [...new Set(values.filter((v): v is string => typeof v === "string"))];
+  if (!keys.length) return "Marca al menos un valor para aceptar.";
+  if (keys.length > SOURCE_APPLY_MAX) return `Máximo ${SOURCE_APPLY_MAX} valores por vez.`;
+  const out = [];
+  for (const k of keys) {
+    const m = ACCEPT_KEY.exec(k);
+    if (!m) return "Un valor marcado no es válido.";
+    out.push({ entity_type: m[1], entity_id: Number(m[2]), field: m[3] });
+  }
+  return out;
+}
+
+/** A source's configuration (editor): countries "US, CO" (empty = all), priority 1-1000. */
+export const sourceUpdateSchema = z.object({
+  code: z.string().regex(/^[a-z0-9_]+$/, "Fuente inválida"),
+  active: z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean()),
+  countries: z
+    .string()
+    .optional()
+    .transform((v) => [...new Set((v ?? "").split(/[\s,;]+/).map((c) => c.trim().toUpperCase()).filter(Boolean))])
+    .refine((cs) => cs.every((c) => /^[A-Z]{2}$/.test(c)), "Países: códigos de dos letras separados por comas"),
+  priority: z.coerce.number({ error: "Prioridad inválida" }).int().min(1, "Prioridad: 1 a 1000").max(1000, "Prioridad: 1 a 1000"),
+});
+
 export const userUpsertSchema = z.object({
   email: z.string().trim().toLowerCase().regex(/^[^@\s]+@[^@\s]+$/, "Correo inválido").max(200),
   name: shortText(120),

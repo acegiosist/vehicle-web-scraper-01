@@ -11,6 +11,9 @@ export const ACTION_LABELS: Record<string, string> = {
   recalculate: "Recálculo",
   export_specs: "Plantilla de captura",
   import_specs: "Captura subida",
+  source_lookup: "Consulta a una fuente",
+  source_apply: "Valores de una fuente",
+  source_update: "Configuración de una fuente",
 };
 
 /** A short text of what a request asked for. */
@@ -35,6 +38,16 @@ export function describePayload(kind: string, payload: unknown): string {
       return [p.make, p.country, p.limit ? `${p.limit} filas` : null].filter(Boolean).join(" · ") || "todas";
     case "import_specs":
       return String(p.file_name ?? "");
+    case "source_lookup":
+      return `${p.source}, generación #${p.generation_id}`;
+    case "source_apply": {
+      const n = Array.isArray(p.accept) ? p.accept.length : 0;
+      return `${n} ${n === 1 ? "valor" : "valores"} de la consulta #${p.lookup_id}`;
+    }
+    case "source_update":
+      return `${p.code}: ${p.active ? "activa" : "desactivada"}, ${
+        Array.isArray(p.countries) && p.countries.length ? p.countries.join(", ") : "todos los países"
+      }, prioridad ${p.priority}`;
     default:
       return "";
   }

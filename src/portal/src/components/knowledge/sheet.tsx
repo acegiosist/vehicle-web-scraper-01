@@ -1,7 +1,7 @@
 import { FieldEditor, type EditTarget } from "@/components/edit/field-editor";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { fieldLabel, formatValue, SOURCE_LABELS, type Catalogs } from "@/lib/fields";
+import { fieldLabel, formatValue, sourceLabel, type Catalogs } from "@/lib/fields";
 import { formatPercent } from "@/lib/format";
 import type { Evidence } from "@/lib/queries/knowledge";
 
@@ -40,7 +40,7 @@ export function Sheet({ fields, values, evidence, catalogs, edit }: Props) {
                 {e?.published ? (
                   <span className="flex flex-wrap items-center gap-1">
                     <Badge variant={e.published.source_kind === "manual" ? "secondary" : "outline"}>
-                      {SOURCE_LABELS[e.published.source_kind] ?? e.published.source_kind}
+                      {sourceLabel(e.published.source_kind, e.published.source_code, e.published.source_name)}
                     </Badge>
                     {e.published.source_kind === "listings" && (
                       <span>
