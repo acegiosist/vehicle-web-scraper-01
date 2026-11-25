@@ -92,6 +92,10 @@ export const FIELDS: Record<string, FieldInfo> = {
   fuel_type: c("Combustible", "fuel_type"),
   transmission_type: c("Transmisión", "transmission_type"),
   drivetrain: c("Tracción", "drivetrain"),
+  // and the final record's (kb.final_listing, schema names)
+  headlight_type: c("Faros", "headlight_type"),
+  brake_front: c("Frenos delanteros", "brake_type"),
+  brake_rear: c("Frenos traseros", "brake_type"),
 };
 
 /** Level columns grouped for the sheets, in display order. */

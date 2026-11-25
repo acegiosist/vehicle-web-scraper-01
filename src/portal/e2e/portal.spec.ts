@@ -178,3 +178,38 @@ test.describe("editor", () => {
     await expect(page.getByRole("row", { name: /nuevo\.revisor@e2e\.test/ })).toContainText("Revisor");
   });
 });
+
+test.describe("fichas (después del recálculo)", () => {
+  test.use({ as: "lector" });
+
+  test("filtra la lista y abre la ficha final de un anuncio", async ({ page }) => {
+    await page.goto("/fichas");
+    const total = page.getByTestId("final-total").filter({ visible: true });
+    await expect(total).toHaveText("17 fichas");
+
+    // The Zoe's model wasn't accepted: it has a record, unassigned, with its reason.
+    await page.getByLabel("Estado").selectOption("sin-asignar");
+    await page.getByRole("button", { name: "Filtrar" }).click();
+    await expect(total).toHaveText("1 ficha");
+    await expect(page.getByTestId("final-row").filter({ visible: true })).toContainText("Modelo no aceptado");
+
+    await page.goto("/fichas");
+    await page.getByLabel("Año").fill("2017");
+    await page.getByPlaceholder("Buscar marca, modelo, versión…").fill("hyundai creta");
+    await page.getByRole("button", { name: "Filtrar" }).click();
+    await expect(total).toHaveText("4 fichas");
+    await page.getByTestId("final-row").filter({ visible: true }).first().getByRole("link").click();
+
+    // The base wins: the editor's manual length (published on the generation) and the
+    // powertrain's power, both applied by the recalculation.
+    await expect(page.getByTestId("final-name").filter({ visible: true })).toHaveText("Hyundai Creta Advance 2017");
+    await expect(page.getByTestId("final-status").filter({ visible: true })).toHaveText("Asignado");
+    await expect(page.locator('[data-field="length_mm"]').filter({ visible: true })).toHaveText(/4\.?300 mm/);
+    await expect(page.locator('[data-field="horsepower_hp"]').filter({ visible: true })).toHaveText("121 hp");
+    await page.getByRole("link", { name: "Ver variante" }).click();
+    await expect(page.getByTestId("variant-name").filter({ visible: true })).toContainText("Hyundai Creta Advance");
+    await page.goBack();
+    await page.getByRole("link", { name: "Volver a la lista" }).click();
+    await expect(total).toHaveText("4 fichas");
+  });
+});

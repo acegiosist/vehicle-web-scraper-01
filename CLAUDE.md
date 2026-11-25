@@ -270,7 +270,9 @@ So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
   Cloud Run). Pages: `/` (estado + Recalcular for editors), `/revision` + `/revision/[id]`
   (queue from the `kb.review_case` view, migration 0009, which the Excel export also reads),
   `/base` → `/base/marca/[id]` → `/base/generacion/[id]` (+ cut/merge) →
-  `/base/tren-motriz/[id]` / `/base/variante/[id]` (+ evolution notes), `/catalogos`,
+  `/base/tren-motriz/[id]` / `/base/variante/[id]` (+ evolution notes), `/fichas` (kb.final_listing:
+  filters país / estado / año / text, `lib/final-listing.ts`) → `/fichas/[sitio]/[anuncio]` (one
+  record, values only; the variant's listings and listing cases link there), `/catalogos`,
   `/usuarios` (editors only), `/acciones` (history). Every write is a server action in
   `lib/actions/request.ts` (Zod in `schemas.ts`, role checked) that only INSERTs into
   `kb.web_action`; editors get inline `FieldEditor`s on the sheets (published values become
@@ -278,7 +280,9 @@ So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
   **Read a page's requests before the data they change**, never in parallel (`recentActionsFor`
   explains why: the worker commits a change and its `applied` status together, so the other
   order shows "Aplicada" next to the old value and the page stops refreshing). The portal repeats a few Python tables (`lib/issues.ts` = review.ISSUES,
-  `lib/auth/roles.ts` = worker roles, `lib/fields.ts` labels and SOURCE_RANK):
+  `lib/auth/roles.ts` = worker roles, `lib/fields.ts` labels and SOURCE_RANK,
+  `lib/final-listing.ts` = final.SOURCES columns and the unassigned reasons of the latest
+  migration that rewrites `listing_level_unassigned_reason_check`):
   `tests/test_portal_sync.py` fails when they drift. After a migration: re-run
   `docs/sql/portal_role.sql` and `pnpm db:types`.
 - Portal end-to-end tests (`src/portal/e2e`, `playwright.config.ts`, `pnpm test:e2e`): the

@@ -52,7 +52,10 @@ Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
       una copia de omnibase en el contenedor desechable (98.198 fichas, ~5 s).
   - [x] `0011_final_listing` aplicada en omnibase y `docs/sql/portal_role.sql` vuelto a correr
         (2026-11-24). Se llena con el siguiente Recalcular.
-  - [ ] Mostrarla en el portal o exportarla a archivo, si hace falta.
+  - [x] Mostrarla en el portal (2026-11-25): sección Fichas, lista con filtros (país, estado,
+        año, texto) y una página por anuncio con sus valores agrupados y enlaces a su generación,
+        tren motriz y variante. Las tablas de anuncios de la variante y los casos de anuncio
+        enlazan a la ficha. Exportarla a archivo queda para cuando haga falta.
 - [ ] **Prueba de punta a punta intermitente** (Recalcular en `/`): unas 3 de 12 corridas la
       respuesta de la server action no termina en el navegador ("Enviando…" se queda) aunque el
       worker aplica el recálculo. Existía antes de la ficha final; no es un bloqueo de la base

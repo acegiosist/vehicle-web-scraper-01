@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { userWithRole } from "@/lib/auth/current-user";
 import { hasRole } from "@/lib/auth/roles";
 import { fieldLabel, formatValue, VARIANT_SHEET_GROUPS } from "@/lib/fields";
+import { finalRecordHref } from "@/lib/final-listing";
 import { formatInt, formatMoney } from "@/lib/format";
 import { recentActionsFor } from "@/lib/queries/actions";
 import { getCatalogs, variant } from "@/lib/queries/knowledge";
@@ -116,7 +117,7 @@ async function VariantView({ params }: PageProps<"/base/variante/[id]">) {
       <Card>
         <CardHeader>
           <CardTitle>Anuncios</CardTitle>
-          <CardDescription>Los 50 más recientes.</CardDescription>
+          <CardDescription>Los 50 más recientes; el año abre la ficha final de cada uno.</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -132,7 +133,11 @@ async function VariantView({ params }: PageProps<"/base/variante/[id]">) {
             <TableBody>
               {listings.map((l) => (
                 <TableRow key={`${l.source_site}:${l.listing_id}`}>
-                  <TableCell>{l.model_year}</TableCell>
+                  <TableCell>
+                    <Link href={finalRecordHref(l.source_site, l.listing_id)} className="underline-offset-2 hover:underline">
+                      {l.model_year ?? "—"}
+                    </Link>
+                  </TableCell>
                   <TableCell>{l.trim_raw ?? "—"}</TableCell>
                   <TableCell>{formatMoney(l.price, l.currency_code)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatInt(l.mileage_km)}</TableCell>

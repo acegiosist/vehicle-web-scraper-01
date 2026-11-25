@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { userWithRole } from "@/lib/auth/current-user";
 import { hasRole } from "@/lib/auth/roles";
 import { fieldLabel, formatValue, type Catalogs } from "@/lib/fields";
+import { finalRecordHref, reasonLabel } from "@/lib/final-listing";
 import { formatDate, formatInt } from "@/lib/format";
 import { ENTITY_LABELS, ISSUES, isIssue, type Issue } from "@/lib/issues";
 import { getCatalogs } from "@/lib/queries/knowledge";
@@ -130,7 +131,8 @@ async function CaseView({ params }: PageProps<"/revision/[id]">) {
                   ["Tracción", formatValue("drivetrain_code", listing.drivetrain_code, catalogs)],
                   ["Cilindraje", formatValue("engine_displacement_l", listing.engine_displacement_l)],
                   ["Potencia", formatValue("horsepower_hp", listing.horsepower_hp)],
-                  ["En la base", listing.variant_id ? <Link href={`/base/variante/${listing.variant_id}`} className="underline">Ver variante</Link> : (listing.excluded_reason ?? listing.unassigned_reason ?? "—")],
+                  ["En la base", listing.variant_id ? <Link href={`/base/variante/${listing.variant_id}`} className="underline">Ver variante</Link> : (listing.excluded_reason ?? (listing.unassigned_reason ? reasonLabel(listing.unassigned_reason) : "—"))],
+                  ["Ficha final", listing.excluded_reason ? "— (fuera del alcance)" : <Link href={finalRecordHref(listing.source_site, listing.listing_id)} className="underline">Ver ficha</Link>],
                 ]}
               />
             </CardContent>
