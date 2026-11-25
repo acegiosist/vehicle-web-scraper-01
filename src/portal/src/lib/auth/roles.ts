@@ -18,6 +18,8 @@ export const ACTION_ROLE = {
   catalog_upsert: "editor",
   user_upsert: "editor",
   recalculate: "editor",
+  export_specs: "revisor",
+  import_specs: "revisor",
 } as const satisfies Record<string, Role>;
 
 export type ActionKind = keyof typeof ACTION_ROLE;

@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { expect, expectLatestAction, iapToken, IAP_HEADER, test, USERS } from "./fixtures";
 
@@ -211,5 +212,49 @@ test.describe("fichas (después del recálculo)", () => {
     await page.goBack();
     await page.getByRole("link", { name: "Volver a la lista" }).click();
     await expect(total).toHaveText("4 fichas");
+  });
+
+  test("un lector no entra a Captura", async ({ page }) => {
+    await page.goto("/captura");
+    await expect(page.getByRole("main").getByText("Sin acceso")).toBeVisible();
+    await expect(page.getByTestId("export-form")).toHaveCount(0);
+  });
+});
+
+test.describe("captura (revisor)", () => {
+  test.use({ as: "revisor" });
+
+  test("prepara la plantilla, la descarga y la sube", async ({ page }) => {
+    await page.goto("/captura");
+    const form = page.getByTestId("export-form").filter({ visible: true });
+    await form.getByLabel("Marca").fill("Kia");
+    await form.getByRole("button", { name: "Preparar plantilla" }).click();
+    // the worker writes it with kb/specs.py; the page refreshes until the link shows
+    const link = page.getByTestId("templates").getByRole("link", { name: "Descargar" }).first();
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("templates")).toContainText("Kia");
+    const [download] = await Promise.all([page.waitForEvent("download"), link.click()]);
+    expect(download.suggestedFilename()).toBe("plantilla-captura-Kia.xlsx");
+    // Playwright keeps it under a temporary name without the extension: upload it by its name
+    const file = {
+      name: download.suggestedFilename(),
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: readFileSync(await download.path()),
+    };
+
+    // the portal refuses what isn't a template before queueing anything
+    const upload = page.getByTestId("upload-form").filter({ visible: true });
+    await upload.getByLabel("Plantilla llena (.xlsx)").setInputFiles({
+      name: "notas.txt", mimeType: "text/plain", buffer: Buffer.from("hola"),
+    });
+    await upload.getByRole("button", { name: "Subir" }).click();
+    await expect(upload).toContainText("El archivo debe ser .xlsx");
+
+    // the template as downloaded (nothing filled) saves nothing and reports no errors
+    await upload.getByLabel("Plantilla llena (.xlsx)").setInputFiles(file);
+    await upload.getByRole("button", { name: "Subir" }).click();
+    const result = page.getByTestId("upload").filter({ visible: true }).first();
+    await expect(result).toContainText("Aplicada", { timeout: 30_000 });
+    await expect(result.getByTestId("upload-saved")).toHaveText("Nada nuevo.");
   });
 });

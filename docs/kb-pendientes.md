@@ -1,7 +1,7 @@
 # Base de conocimiento: pendientes
 
 Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración
-`0013_year_outside_generation`).
+`0015_capture_actions`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -16,6 +16,20 @@ Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
       Acordado: Claude con revisión humana, fuentes externas y captura manual, con prioridad
       manual > externa > anuncios > Claude. Para Claude falta la clave de API en la máquina, y
       cada envío necesita aprobación (cuesta dinero). Los datos de Cofino nunca se envían.
+  - [x] Plantilla de captura (2026-11-25): `kb specs export` escribe un Excel con las
+        generaciones y trenes motrices con anuncios a los que les falta algún dato (más anuncios
+        primero, con los valores actuales); `kb specs import ... --by` guarda lo capturado como
+        fuente externa aceptada (con la fuente citada, obligatoria) y recalcula. Si los anuncios
+        lo contradicen en más de 10 % se abre un caso. Los años del ciclo abren un caso
+        "Ciclo de una fuente" (`generation_cycle`, migración `0014_generation_cycle`).
+  - [x] La plantilla también desde el portal (2026-11-25): página Captura (revisores) para
+        preparar y descargar la plantilla y subirla llena; el worker usa el mismo código que la
+        terminal y lo subido se publica al recalcular. Migración `0015_capture_actions`.
+  - [x] Migraciones `0014_generation_cycle` y `0015_capture_actions` aplicadas en omnibase
+        (2026-11-25; solo cambian restricciones, no hace falta `portal_role.sql`).
+  - [ ] Llenar la plantilla (trabajo del equipo), empezando por los modelos con más anuncios.
+  - [ ] Conjuntos de datos públicos (p. ej. fueleconomy.gov para EE. UU.) y lotes con Claude:
+        sin empezar.
 - [ ] **Asignar el segmento a cada generación**: la regla por largo propone (A < 3,7 m … F > 5,1 m),
       luego fuentes externas o Claude, y la corrección manual gana. Depende de tener las
       dimensiones.

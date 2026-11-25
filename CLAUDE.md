@@ -40,6 +40,8 @@ PYTHONPATH=src python -m vehicle_scraper kb clean                       # makes,
 PYTHONPATH=src python -m vehicle_scraper kb build                       # generations, powertrains, variants (after clean)
 PYTHONPATH=src python -m vehicle_scraper kb review export --out data/review.xlsx [--issue weak_model] [--limit N]
 PYTHONPATH=src python -m vehicle_scraper kb review import data/review.xlsx --reviewer "Nombre"   # then clean + build
+PYTHONPATH=src python -m vehicle_scraper kb specs export --out data/specs.xlsx [--make Kia] [--country CO] [--limit 500]
+PYTHONPATH=src python -m vehicle_scraper kb specs import data/specs.xlsx --by "Nombre"   # external evidence, then build
 PYTHONPATH=src python -m vehicle_scraper kb worker [--once] [--poll 30]   # applies the portal's kb.web_action queue
 
 # portal (src/portal, Next.js 16; needs src/portal/.env.local, see its .env.example and README)
@@ -158,7 +160,7 @@ debugging.
 
 Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
 powertrain → commercial variant per country and trim, with structured evolution notes.
-So far (migrations `0001_catalogs_staging` … `0013_year_outside_generation`):
+So far (migrations `0001_catalogs_staging` … `0015_capture_actions`):
 - **The database is created by its owner.** Code only creates objects, through Alembic
   (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
   schemas. `alembic_version` stays in `public`.
@@ -255,6 +257,27 @@ So far (migrations `0001_catalogs_staging` … `0013_year_outside_generation`):
   (`--no-rebuild` skips). Effects live where the rule lives: make/model decisions and
   per-listing overrides in `clean._apply_decisions`/`_listing_overrides` (provenance
   `manual`), splits, manual spec values and evolution notes in `build._apply_decisions`.
+- `kb specs export/import` (`kb/specs.py`, decided 2026-11-25): an .xlsx to capture from a
+  source what listings don't carry. Sheets "Generaciones" (cycle years, segment, dimensions,
+  doors, seats, cargo, tank) and "Trenes motrices" (engine code/name, power, torque, gears,
+  cylinders, economy, EV range/charging), rows = entities with listings missing a value, most
+  listings first, pre-filled with the current values. Import: a changed value needs "fuente"
+  and becomes `external` evidence, **accepted** (`detail`: source, captured_by, file, note;
+  re-importing replaces it); blank or unchanged cells do nothing; numbers in `SPEC_RANGES` /
+  `levels.RANGES`; a segment must fit the model's class and body (the generation trigger's
+  rules, checked per row). Different cycle years open `generation_cycle` (migration 0014;
+  current/proposed `{year_from, year_to}`; corrections "2017-2022" / "2017-"), applied once by
+  `build._apply_decisions` while the generation still has the current years. A bad row is
+  reported and skipped; then `kb build` runs in the same transaction (`--no-rebuild`). In
+  `kb build`, an accepted external number the listings contradict by > 10 % opens
+  `spec_disagreement` (`evidence.external`; the source's value stays published).
+  The portal's `/captura` page (revisor, decided 2026-11-25) does the same through the worker
+  (actions `export_specs` / `import_specs`, migration 0015, `worker.REQUIRED_ROLE`): the worker
+  writes the template with `specs.write_template` into the action's `result` (base64, served
+  by `app/captura/plantilla/[id]/route.ts`), and an upload (≤ 700 KB, `SPECS_MAX_BYTES` on
+  both sides) travels base64 in the `payload` and is saved by `specs.save_template` as the
+  uploader's external evidence, **without** rebuilding (it publishes on Recalcular). Lists
+  read `payload - 'file_b64'` / `result - 'file_b64'`, never the files.
 - Portal backend (migration `0007_portal`, `kb/worker.py`; the Next.js site goes in
   `src/portal`, never `src/web`, which holds old-branch leftovers): `kb.app_user` maps an
   email (from GCP IAP) to `lector` < `revisor` < `editor`; `kb.web_action` is the only table
@@ -283,7 +306,8 @@ So far (migrations `0001_catalogs_staging` … `0013_year_outside_generation`):
   `/base` → `/base/marca/[id]` → `/base/generacion/[id]` (+ cut/merge) →
   `/base/tren-motriz/[id]` / `/base/variante/[id]` (+ evolution notes), `/fichas` (kb.final_listing:
   filters país / estado / año / text, `lib/final-listing.ts`) → `/fichas/[sitio]/[anuncio]` (one
-  record, values only; the variant's listings and listing cases link there), `/catalogos`,
+  record, values only; the variant's listings and listing cases link there), `/captura`
+  (capture template: prepare, download, upload; revisor), `/catalogos`,
   `/usuarios` (editors only), `/acciones` (history). Every write is a server action in
   `lib/actions/request.ts` (Zod in `schemas.ts`, role checked) that only INSERTs into
   `kb.web_action`; editors get inline `FieldEditor`s on the sheets (published values become

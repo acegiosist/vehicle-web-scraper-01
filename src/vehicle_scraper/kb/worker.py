@@ -17,9 +17,13 @@ LISTEN/NOTIFY on ``kb_web_action`` wakes the worker at once; ``poll`` seconds is
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import re
+import tempfile
+from pathlib import Path
 from typing import Callable, Optional
 
 from .db import take_writer_lock
@@ -29,7 +33,11 @@ from .review import InvalidDecision, parse_value, record_decision
 log = logging.getLogger(__name__)
 
 ROLE_RANK = {"lector": 0, "revisor": 1, "editor": 2}
-REQUIRED_ROLE = {"decide_case": "revisor"}          # everything else needs "editor"
+# everything else needs "editor"
+REQUIRED_ROLE = {"decide_case": "revisor", "export_specs": "revisor", "import_specs": "revisor"}
+SPECS_MAX_BYTES = 700 * 1024                         # an uploaded template (the portal says the same)
+SPECS_MAX_LIMIT = 2000                               # rows per sheet in a template prepared from the portal
+SPECS_MAX_ERRORS = 200                               # row errors kept on the action
 TABLES = {"generation": "kb.generation", "powertrain": "kb.powertrain", "variant": "kb.commercial_variant"}
 # Values published from evidence: an edit becomes manual evidence (which always wins).
 EVIDENCE_COLUMNS = {"generation": set(GENERATION_COLUMNS), "powertrain": set(POWERTRAIN_COLUMNS),
@@ -257,10 +265,55 @@ ON CONFLICT (email) DO UPDATE SET name = coalesce(EXCLUDED.name, kb.app_user.nam
     return {"email": target, "role": role, "active": active}
 
 
+def _export_specs(cur, p: dict, email: str) -> dict:
+    """The capture template (kb/specs.py), returned in the result for the portal to download."""
+    from .specs import write_template
+    make = str(p.get("make") or "").strip() or None
+    country = str(p.get("country") or "").strip().upper() or None
+    if country and not re.fullmatch(r"[A-Z]{2}", country):
+        raise ActionError(f"país {country!r} no válido")
+    limit = _int(p, "limit") if p.get("limit") is not None else 500
+    if not 1 <= limit <= SPECS_MAX_LIMIT:
+        raise ActionError(f"límite: entre 1 y {SPECS_MAX_LIMIT} filas")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "plantilla.xlsx"
+        counts = write_template(cur, path, make=make, country=country, limit=limit)
+        data = path.read_bytes()
+    name = "plantilla-captura" + "".join(f"-{compact}" for compact in (make, country) if compact) + ".xlsx"
+    return {"file_name": re.sub(r"[^A-Za-z0-9._-]", "_", name), "file_b64": base64.b64encode(data).decode(),
+            "generations": counts["generations"], "powertrains": counts["powertrains"]}
+
+
+def _import_specs(cur, p: dict, email: str) -> dict:
+    """A filled template uploaded from the portal, saved like `kb specs import` (no rebuild:
+    the portal only recalculates from its button)."""
+    from .specs import read_template, save_template
+    try:
+        data = base64.b64decode(str(p.get("file_b64") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise ActionError("el archivo no llegó completo")
+    if not data:
+        raise ActionError("el archivo está vacío")
+    if len(data) > SPECS_MAX_BYTES:
+        raise ActionError(f"el archivo pesa más de {SPECS_MAX_BYTES // 1024} KB")
+    file_name = Path(str(p.get("file_name") or "plantilla.xlsx")).name[:120]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "plantilla.xlsx"
+        path.write_bytes(data)
+        try:
+            out = save_template(cur, read_template(path), email, file_name)
+        except ValueError as e:
+            raise ActionError(str(e))
+    errors = out["errors"]
+    return {"saved": out["saved"], "errors": errors[:SPECS_MAX_ERRORS], "error_count": len(errors),
+            "note": "los valores se publican al recalcular"}
+
+
 HANDLERS: dict[str, Callable] = {
     "decide_case": _decide_case, "set_value": _set_value, "split_generation": _split_generation,
     "merge_generations": _merge_generations, "add_evolution_note": _add_evolution_note,
     "catalog_upsert": _catalog_upsert, "user_upsert": _user_upsert,
+    "export_specs": _export_specs, "import_specs": _import_specs,
 }
 
 

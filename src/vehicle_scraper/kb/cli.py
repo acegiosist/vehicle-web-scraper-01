@@ -50,6 +50,18 @@ def add_parser(sub) -> None:
     ri.add_argument("--reviewer", required=True, help="who decided (recorded on every case)")
     ri.add_argument("--no-rebuild", action="store_true", help="only save the decisions (no clean + build)")
 
+    sp = ksub.add_parser("specs", help="capture what listings don't carry (dimensions, torque...) from a source")
+    ssub = sp.add_subparsers(dest="specs_cmd", required=True)
+    se = ssub.add_parser("export", help="write generations and powertrains missing values to a .xlsx")
+    se.add_argument("--out", type=Path, default=Path("data/specs.xlsx"))
+    se.add_argument("--make", default=None, help="only this make")
+    se.add_argument("--country", default=None, help="only generations with listings from this country (CO, US...)")
+    se.add_argument("--limit", type=int, default=500, help="at most this many rows per sheet")
+    si = ssub.add_parser("import", help="save the captured values as external evidence, then re-run build")
+    si.add_argument("path", type=Path)
+    si.add_argument("--by", required=True, help="who captured the values (recorded with each one)")
+    si.add_argument("--no-rebuild", action="store_true", help="only save the values (no build)")
+
     w = ksub.add_parser("worker", help="apply the portal's queued actions (kb.web_action)")
     w.add_argument("--once", action="store_true", help="apply what is queued, then exit")
     w.add_argument("--poll", type=float, default=30.0, help="seconds between queue checks without a NOTIFY")
@@ -169,6 +181,36 @@ def cmd_review(url: str, args) -> int:
     return 0
 
 
+def cmd_specs(url: str, args) -> int:
+    from .db import connect
+    from .specs import export_specs, import_specs
+    with connect(url) as conn:
+        if args.specs_cmd == "export":
+            try:
+                s = export_specs(conn, args.out, make=args.make, country=args.country, limit=args.limit)
+            except PermissionError:
+                print(f"Can't write {args.out}: close it in Excel (or pass --out) and retry.", file=sys.stderr)
+                return 1
+            print(f"Wrote {s['generations']} generations and {s['powertrains']} powertrains missing values "
+                  f"to {s['file']}")
+            return 0
+        s = import_specs(conn, args.path, args.by, rebuild=not args.no_rebuild)
+    saved = s["saved"]
+    print(f"Read {s['file']}: generation values={saved.get('generation_values', 0)} "
+          f"powertrain values={saved.get('powertrain_values', 0)} "
+          f"cycle cases opened={saved.get('cycle_opened', 0)} (already decided={saved.get('cycle_already_decided', 0)}) "
+          f"errors={len(s['errors'])}")
+    for e in s["errors"]:
+        print(f"  {e['sheet']} row {e['row']}" + (f" (id {e['id']})" if "id" in e else "") + f": {e['error']}")
+    if s["errors"]:
+        print("  Those rows weren't saved: fix them and import the file again.")
+    if "build" in s:
+        print_build_summary(s["build"])
+    elif not args.no_rebuild:
+        print("No value changed, so build didn't run.")
+    return 0
+
+
 def cmd_worker(url: str, args) -> int:
     import psycopg
     from .db import libpq_url
@@ -239,4 +281,5 @@ def run(args: argparse.Namespace) -> int:
         print(e, file=sys.stderr)
         return 2
     return {"migrate": cmd_migrate, "import": cmd_import, "clean": cmd_clean, "build": cmd_build,
-            "review": cmd_review, "worker": cmd_worker, "status": cmd_status}[args.kb_cmd](url, args)
+            "review": cmd_review, "specs": cmd_specs, "worker": cmd_worker,
+            "status": cmd_status}[args.kb_cmd](url, args)

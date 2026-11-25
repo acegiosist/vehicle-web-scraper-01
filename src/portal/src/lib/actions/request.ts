@@ -9,8 +9,10 @@ import { getDb } from "@/lib/db";
 
 import {
   catalogUpsertSchema,
+  checkSpecsFile,
   decideCaseSchema,
   evolutionNoteSchema,
+  exportSpecsSchema,
   mergeGenerationsSchema,
   setValueSchema,
   splitGenerationSchema,
@@ -76,6 +78,21 @@ export async function upsertCatalog(_prev: RequestState, form: FormData): Promis
 
 export async function upsertUser(_prev: RequestState, form: FormData): Promise<RequestState> {
   return parseAndQueue("user_upsert", userUpsertSchema, form);
+}
+
+export async function exportSpecs(_prev: RequestState, form: FormData): Promise<RequestState> {
+  return parseAndQueue("export_specs", exportSpecsSchema, form);
+}
+
+/** A filled capture template: the file travels to the worker inside the request (base64). */
+export async function importSpecs(_prev: RequestState, form: FormData): Promise<RequestState> {
+  const file = form.get("file");
+  const error = checkSpecsFile(file instanceof File ? file : null);
+  if (error) return { status: "error", error };
+  const f = file as File;
+  const data = Buffer.from(await f.arrayBuffer());
+  if (data.subarray(0, 2).toString("latin1") !== "PK") return { status: "error", error: "No es un archivo .xlsx válido." };
+  return queue("import_specs", { file_name: f.name.slice(0, 120), file_b64: data.toString("base64") });
 }
 
 export async function recalculate(_prev: RequestState, _form: FormData): Promise<RequestState> {

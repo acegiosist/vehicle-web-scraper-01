@@ -52,6 +52,7 @@ const CORRECTION_HINTS: Partial<Record<Issue, string>> = {
   model_is_attributes: "Nombre del modelo de este anuncio.",
   generation_split: "Año (p. ej. 2020).",
   year_outside_generation: "Año de fin (o de inicio) que debe tener la generación.",
+  generation_cycle: "Inicio-fin, p. ej. 2017-2022 (2017- si sigue vigente).",
   evolution_note: "Año desde el que aplica.",
 };
 

@@ -9,6 +9,8 @@ export const ACTION_LABELS: Record<string, string> = {
   catalog_upsert: "Catálogo",
   user_upsert: "Usuario",
   recalculate: "Recálculo",
+  export_specs: "Plantilla de captura",
+  import_specs: "Captura subida",
 };
 
 /** A short text of what a request asked for. */
@@ -29,6 +31,10 @@ export function describePayload(kind: string, payload: unknown): string {
       return `${p.table}: ${p.code}`;
     case "user_upsert":
       return `${p.email}: ${p.role}${p.active === false ? " (inactivo)" : ""}`;
+    case "export_specs":
+      return [p.make, p.country, p.limit ? `${p.limit} filas` : null].filter(Boolean).join(" · ") || "todas";
+    case "import_specs":
+      return String(p.file_name ?? "");
     default:
       return "";
   }

@@ -24,7 +24,7 @@ export default function UsersPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
         <p className="text-sm text-muted-foreground">
-          Quién entra (su correo de Google, vía IAP) y con qué rol: lector ve todo, revisor además decide casos, editor
+          Quién entra (su correo de Google, vía IAP) y con qué rol: lector ve todo, revisor además decide casos y usa Captura, editor
           además edita fichas, catálogos y usuarios.
         </p>
       </div>

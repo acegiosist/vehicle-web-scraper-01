@@ -366,6 +366,73 @@ def test_years_of_a_rejected_generation_propose_nothing(conn, tmp_path):
     assert q(conn, "SELECT count(*) FROM kb.review_item WHERE issue = 'year_outside_generation'") == [(0,)]
 
 
+def test_specs_template_round_trip(conn, tmp_path):
+    from vehicle_scraper.kb.specs import GENERATIONS, POWERTRAINS, export_specs, import_specs
+    from vehicle_scraper.xlsx import Sheet, read_sheet, write_workbook
+    built(conn, tmp_path, [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(5)])
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    pid = q(conn, "SELECT id FROM kb.powertrain")[0][0]
+    out = tmp_path / "specs.xlsx"
+    assert export_specs(conn, out) == {"file": str(out), "generations": 1, "powertrains": 1}
+    gens, pts = read_sheet(out, GENERATIONS), read_sheet(out, POWERTRAINS)
+    gh, ph = gens[0], pts[0]
+    assert gens[1][gh.index("id")] == gid and pts[1][ph.index("potencia hp")] == 121   # what the base has now
+
+    def row(header, base, **cells):
+        r = list(base) + [None] * (len(header) - len(base))
+        for k, v in cells.items():
+            r[header.index(k)] = v
+        return r
+    gens_rows = [row(gh, gens[1], **{"largo mm": 4300, "segmento": "B", "año inicio": 2015, "año fin": 2020,
+                                     "fuente": "Ficha Hyundai 2017", "nota": "versión colombiana"}),
+                 row(gh, gens[1], **{"largo mm": 4400}),                       # no source
+                 row(gh, gens[1], **{"segmento": "PickupMidsize", "fuente": "x"}),   # not for an SUV
+                 row(gh, [999999], **{"largo mm": 4300, "fuente": "x"})]
+    pts_rows = [row(ph, pts[1], **{"torque Nm": 151, "potencia hp": 140, "velocidades": 6, "fuente": "Ficha"}),
+                row(ph, pts[1], **{"velocidades": 40, "fuente": "x"})]       # out of range
+    filled = tmp_path / "filled.xlsx"
+    write_workbook(filled, [Sheet(GENERATIONS, gh, gens_rows), Sheet(POWERTRAINS, ph, pts_rows)])
+
+    s = import_specs(conn, filled, "Ana")
+    assert s["saved"] == {"generation_values": 2, "cycle_opened": 1, "generation_rows": 1, "powertrain_values": 3,
+                          "powertrain_rows": 1}
+    assert [(e["sheet"], e["row"], e["error"]) for e in s["errors"]] == [
+        (GENERATIONS, 3, "falta la fuente"),
+        (GENERATIONS, 4, "el segmento PickupMidsize solo aplica a carrocería Pickup"),
+        (GENERATIONS, 5, "no existe"),
+        (POWERTRAINS, 3, "40 está fuera del rango 1-12 de gears")]
+    # published at once (the import ran build): the source beats the listings
+    assert q(conn, "SELECT length_mm, segment_code, year_from, year_to FROM kb.generation") == [(4300, "B", None, None)]
+    assert q(conn, "SELECT torque_nm, horsepower_hp, gears FROM kb.powertrain") == [(151, 140, 6)]
+    assert q(conn, "SELECT detail->>'source', detail->>'captured_by', detail->>'note' FROM kb.spec_evidence "
+                   "WHERE source_kind = 'external' AND field = 'length_mm'") == [
+        ("Ficha Hyundai 2017", "Ana", "versión colombiana")]
+    # the listings say 121 hp, more than 10 % from the source: a case, the source's value stays
+    assert q(conn, "SELECT current_value, proposed_value, evidence->'external' FROM kb.review_item "
+                   "WHERE issue = 'spec_disagreement' AND field = 'horsepower_hp'") == [(140, 121, 140)]
+    # the cycle waits for a person
+    case, current, proposed = q(conn, "SELECT id, current_value, proposed_value FROM kb.review_item "
+                                      "WHERE issue = 'generation_cycle'")[0]
+    assert (current, proposed) == ({"year_from": None, "year_to": None}, {"year_from": 2015, "year_to": 2020})
+    assert decide_now(conn, case, "aprobar") == "approved"
+    build(conn)
+    assert q(conn, "SELECT year_from, year_to, source FROM kb.generation") == [(2015, 2020, "external")]
+    assert q(conn, "SELECT count(*) FROM kb.listing_level WHERE generation_id = %s", gid) == [(5,)]
+    # importing the same file again changes nothing and asks nothing
+    s = import_specs(conn, filled, "Ana")
+    assert s["saved"] == {} and "build" not in s
+    assert pid == q(conn, "SELECT id FROM kb.powertrain")[0][0]
+
+
+def test_cycle_corrections_are_validated():
+    from vehicle_scraper.kb.review import InvalidDecision, parse_cycle
+    assert parse_cycle("2017-2022") == {"year_from": 2017, "year_to": 2022}
+    assert parse_cycle(" 2017 - ") == {"year_from": 2017, "year_to": None}
+    for bad in ("2022-2017", "2017", "abc", None):
+        with pytest.raises(InvalidDecision):
+            parse_cycle(bad)
+
+
 def test_a_verified_variant_keeps_its_values(conn, tmp_path):
     recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", sunroof=True) for i in range(5)]
     built(conn, tmp_path, recs)
@@ -583,6 +650,48 @@ def test_worker_roles_and_decisions(conn, tmp_path):
     status, error, result = action(conn, a7)
     assert status == "applied" and result["build"]["assigned"] == 8
     assert q(conn, "SELECT year_from, year_to FROM kb.generation ORDER BY id") == [(2017, 2019), (2020, None)]
+
+
+def test_worker_capture_template(conn, tmp_path):
+    import base64
+    from vehicle_scraper.kb.specs import GENERATIONS, POWERTRAINS
+    from vehicle_scraper.xlsx import Sheet, read_sheet, write_workbook
+    built(conn, tmp_path, [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(5)])
+    users(conn, ana="revisor", leo="lector")
+    a1 = request(conn, "export_specs", {"limit": 500}, "leo@x.co")                     # lector: refused
+    a2 = request(conn, "export_specs", {"country": "Colombia", "limit": 500}, "ana@x.co")
+    a3 = request(conn, "export_specs", {"make": "Hyundai", "country": "co", "limit": 500}, "ana@x.co")
+    drain(conn)
+    assert "revisor" in action(conn, a1)[1] and "país" in action(conn, a2)[1]
+    status, _, result = action(conn, a3)
+    assert status == "applied" and (result["generations"], result["powertrains"]) == (1, 1)
+    assert result["file_name"] == "plantilla-captura-Hyundai-CO.xlsx"
+    template = tmp_path / "t.xlsx"
+    template.write_bytes(base64.b64decode(result["file_b64"]))
+    gens, pts = read_sheet(template, GENERATIONS), read_sheet(template, POWERTRAINS)
+    gens[1] += [None] * (len(gens[0]) - len(gens[1]))
+    gens[1][gens[0].index("largo mm")] = 4300
+    gens[1][gens[0].index("fuente")] = "Ficha Hyundai"
+    filled = tmp_path / "f.xlsx"
+    write_workbook(filled, [Sheet(GENERATIONS, gens[0], gens[1:]), Sheet(POWERTRAINS, pts[0], pts[1:])])
+
+    def upload(path, name="f.xlsx"):
+        return request(conn, "import_specs", {"file_name": name, "file_b64": base64.b64encode(path.read_bytes()).decode()},
+                       "ana@x.co")
+    bad = tmp_path / "bad.xlsx"
+    bad.write_bytes(b"not a zip")
+    a4, a5 = upload(filled), upload(bad, "bad.xlsx")
+    drain(conn)
+    status, _, result = action(conn, a4)
+    assert status == "applied" and result["saved"] == {"generation_values": 1, "generation_rows": 1}
+    assert result["errors"] == [] and "recalcular" in result["note"]
+    assert action(conn, a5)[:2] == ("failed", "no es un archivo .xlsx válido")
+    # saved as the uploader's external evidence; published on the next recalculation, not before
+    assert q(conn, "SELECT detail->>'captured_by', detail->>'file' FROM kb.spec_evidence WHERE source_kind = 'external'") \
+        == [("ana@x.co", "f.xlsx")]
+    assert q(conn, "SELECT length_mm FROM kb.generation") == [(None,)]
+    build(conn)
+    assert q(conn, "SELECT length_mm FROM kb.generation") == [(4300,)]
 
 
 def test_worker_edits(conn, tmp_path):

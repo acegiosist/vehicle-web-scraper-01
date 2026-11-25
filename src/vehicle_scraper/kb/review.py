@@ -38,8 +38,8 @@ CATALOG_FIELDS = {"body_style": "body_style", "fuel_type": "fuel_type", "transmi
 TEXT_FIELDS = {"tire_size", "country_of_manufacture"}
 # Order of the rows: identity first (it unblocks the most), then levels, then listings.
 ISSUE_ORDER = ["unknown_make", "missing_make", "weak_model", "model_is_attributes", "generation_split",
-               "year_outside_generation", "spec_disagreement", "evolution_note", "field_conflict",
-               "implausible_value"]
+               "year_outside_generation", "generation_cycle", "spec_disagreement", "evolution_note",
+               "field_conflict", "implausible_value"]
 
 # issue: (what to check, approve, reject, correct)
 ISSUES = {
@@ -61,8 +61,12 @@ ISSUES = {
                                 "Extender el ciclo hasta el año propuesto (los anuncios entran al recalcular).",
                                 "No extender: esos anuncios siguen sin asignar.",
                                 "Escribir el año correcto de inicio o de fin."),
-    "spec_disagreement": ("Los anuncios no coinciden en un dato mecánico (más de 10 % de diferencia), o "
-                          "cambiarían un valor de una entidad verificada.",
+    "generation_cycle": ("Una fuente da los años oficiales de esta generación (ver la fuente en la evidencia).",
+                         "Fijar el ciclo propuesto (los anuncios se mueven al recalcular).",
+                         "Dejar el ciclo como está.",
+                         "Escribir el ciclo correcto: inicio-fin, p. ej. 2017-2022 (2017- si sigue vigente)."),
+    "spec_disagreement": ("Los anuncios no coinciden en un dato mecánico (más de 10 % de diferencia), no "
+                          "coinciden con una fuente externa, o cambiarían un valor de una entidad verificada.",
                           "El valor propuesto es correcto.",
                           "No fijar el valor (siguen votando los anuncios; en una verificada se queda el actual).",
                           "Escribir el valor correcto."),
@@ -179,6 +183,23 @@ def _year(raw) -> int:
     return y
 
 
+def check_cycle(year_from: Optional[int], year_to: Optional[int]) -> dict:
+    """A generation's cycle as stored in a case, or InvalidDecision."""
+    if year_from is None:
+        raise InvalidDecision("falta el año de inicio")
+    if year_to is not None and year_to < year_from:
+        raise InvalidDecision(f"el fin ({year_to}) es anterior al inicio ({year_from})")
+    return {"year_from": year_from, "year_to": year_to}
+
+
+def parse_cycle(raw) -> dict:
+    """"2017-2022" or "2017-" (still on sale) -> {"year_from", "year_to"}, or InvalidDecision."""
+    m = re.fullmatch(r"\s*(\d{4})\s*[-–]\s*(\d{4})?\s*", str(raw or ""))
+    if not m:
+        raise InvalidDecision(f"{raw!r}: escribir inicio-fin, p. ej. 2017-2022 (o 2017- si sigue vigente)")
+    return check_cycle(_year(m.group(1)), _year(m.group(2)) if m.group(2) else None)
+
+
 def _make_named(cur, name) -> int:
     cur.execute("SELECT a.make_id FROM kb.make_alias a JOIN kb.make k ON k.id = a.make_id "
                 "WHERE a.alias_key = %s AND k.status = 'accepted'", (compact_key(name),))
@@ -226,6 +247,8 @@ def decide(cur, case: dict, decision: str, corrected, klass) -> tuple[str, objec
             raise InvalidDecision(f"{year} no extiende el ciclo: el {'fin' if fname == 'year_to' else 'inicio'} "
                                   f"actual es {boundary}")
         return status, year
+    if issue == "generation_cycle":
+        return status, parse_cycle(corrected)
     if issue == "evolution_note":
         return status, {"value": (case["proposed"] or {}).get("value"), "year_from": _year(corrected)}
     return status, parse_value(cur, fname, corrected)

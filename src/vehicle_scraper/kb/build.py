@@ -183,6 +183,15 @@ def _evolution(by_year: dict) -> Optional[tuple[int, object, object, int, int]]:
     return best
 
 
+def _differs(reference, value) -> bool:
+    """A number more than MECH_DISAGREEMENT away from the reference."""
+    try:
+        ref, v = float(reference), float(value)
+    except (TypeError, ValueError):
+        return reference != value
+    return abs(v - ref) > MECH_DISAGREEMENT * abs(ref)
+
+
 def _load(cur, sql: str, args=None) -> list[tuple]:
     cur.execute(sql, args)
     return cur.fetchall()
@@ -228,6 +237,15 @@ WHERE issue = 'year_outside_generation' AND status IN ('approved', 'corrected')"
         year = int(corrected if status == "corrected" else proposed)
         cur.execute(f"UPDATE kb.generation SET {fname} = %s, source = 'manual', updated_at = now() "
                     f"WHERE id = %s AND {fname} = %s", (year, gen_id, (evidence or {}).get("boundary")))
+    # Approved cycles from a source (generation_cycle, opened by `kb specs import`): applied once,
+    # while the generation still has the years the case was opened against.
+    for gen_id, status, current, proposed, corrected in _load(cur, """
+SELECT entity_key::bigint, status, current_value, proposed_value, corrected_value FROM kb.review_item
+WHERE issue = 'generation_cycle' AND status IN ('approved', 'corrected')"""):
+        cycle, was = (corrected if status == "corrected" else proposed) or {}, current or {}
+        cur.execute("UPDATE kb.generation SET year_from = %s, year_to = %s, source = 'external', updated_at = now() "
+                    "WHERE id = %s AND year_from IS NOT DISTINCT FROM %s AND year_to IS NOT DISTINCT FROM %s",
+                    (cycle.get("year_from"), cycle.get("year_to"), gen_id, was.get("year_from"), was.get("year_to")))
     # Corrected or approved values become manual evidence, which no rule overrides.
     for etype, eid, fname, status, proposed, current, corrected, case_id in _load(cur, """
 SELECT entity_type, entity_key::bigint, field, status, proposed_value, current_value, corrected_value, id
@@ -486,6 +504,11 @@ SELECT entity_type, entity_id, field, value, support, agreement, detail FROM kb.
 WHERE source_kind = 'listings' AND status = 'accepted'"""):
             if (etype, eid) in verified:
                 frozen[(etype, eid, f)] = (value, support, agreement, detail)
+        # A source's value (`kb specs import`) that the listings contradict by more than 10 %
+        # opens a spec_disagreement; the source's value stays published meanwhile.
+        external = {(etype, eid, f): value for etype, eid, f, value in _load(cur, """
+SELECT entity_type, entity_id, field, value FROM kb.spec_evidence
+WHERE source_kind = 'external' AND status = 'accepted'""")}
         evidence = []
         voting = {"generation": GENERATION_FROM_LISTINGS, "powertrain": POWERTRAIN_FROM_LISTINGS,
                   "variant": VARIANT_FROM_LISTINGS}
@@ -502,6 +525,11 @@ WHERE source_kind = 'listings' AND status = 'accepted'"""):
                     if r["disagree"]:
                         cases.add(level, eid, "spec_disagreement", field_name=f, current=r["value"],
                                   proposed=r["value"], evidence=detail, listings=r["support"])
+                    source_value = external.get((level, eid, f))
+                    if source_value is not None and f not in EQUIPMENT_FIELDS and _differs(source_value, r["value"]):
+                        cases.add(level, eid, "spec_disagreement", field_name=f, current=source_value,
+                                  proposed=r["value"], evidence={**detail, "external": source_value},
+                                  listings=r["support"])
                     kept = frozen.get((level, eid, f))
                     if kept is None:
                         evidence.append((level, eid, f, json.dumps(r["value"]), r["status"], r["support"],

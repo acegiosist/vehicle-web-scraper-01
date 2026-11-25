@@ -78,6 +78,29 @@ export const catalogUpsertSchema = z.object({
   body_style_code: shortText(40),
 });
 
+/** Filters of the capture template (kb/specs.py); the worker checks them again. */
+export const exportSpecsSchema = z.object({
+  make: shortText(60),
+  country: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^([A-Z]{2})?$/, "País: dos letras (CO, US…)")
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  limit: z.coerce.number({ error: "Límite inválido" }).int().min(1, "Mínimo 1 fila").max(2000, "Máximo 2000 filas"),
+});
+
+/** An uploaded template: kb worker SPECS_MAX_BYTES is the same limit. */
+export const SPECS_MAX_BYTES = 700 * 1024;
+
+export function checkSpecsFile(file: { name: string; size: number } | null): string | null {
+  if (!file || file.size === 0) return "Elige el archivo de la plantilla.";
+  if (!/\.xlsx$/i.test(file.name)) return "El archivo debe ser .xlsx (la plantilla descargada aquí).";
+  if (file.size > SPECS_MAX_BYTES) return `El archivo pesa más de ${SPECS_MAX_BYTES / 1024} KB.`;
+  return null;
+}
+
 export const userUpsertSchema = z.object({
   email: z.string().trim().toLowerCase().regex(/^[^@\s]+@[^@\s]+$/, "Correo inválido").max(200),
   name: shortText(120),
