@@ -9,7 +9,7 @@ import { SOURCE_RANK, type Catalogs } from "@/lib/fields";
 
 const CATALOG_TABLES = [
   "segment", "body_style", "fuel_type", "transmission_type", "drivetrain", "headlight_type", "brake_type",
-  "country", "exclusion_reason",
+  "country", "exclusion_reason", "vehicle_class",
 ] as const;
 
 /** code -> Spanish name for every catalog, once per request. */

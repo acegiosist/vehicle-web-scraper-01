@@ -1,7 +1,7 @@
 # Base de conocimiento: pendientes
 
 Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración
-`0015_capture_actions`).
+`0016_vehicle_identity`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -76,10 +76,21 @@ Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
       una copia de omnibase en el contenedor desechable (98.198 fichas, ~5 s).
   - [x] `0011_final_listing` aplicada en omnibase y `docs/sql/portal_role.sql` vuelto a correr
         (2026-11-24). Se llena con el siguiente Recalcular.
-  - [x] Mostrarla en el portal (2026-11-25): sección Fichas, lista con filtros (país, estado,
-        año, texto) y una página por anuncio con sus valores agrupados y enlaces a su generación,
+  - [x] Mostrarla en el portal (2026-11-25): sección Fichas (después pasó a listar vehículos:
+        ver la ficha de identidad abajo), lista con filtros (país, estado, año, texto) y una
+        página por anuncio con sus valores agrupados y enlaces a su generación,
         tren motriz y variante. Las tablas de anuncios de la variante y los casos de anuncio
         enlazan a la ficha. Exportarla a archivo queda para cuando haga falta.
+- [x] Ficha de identidad del vehículo (2026-11-25): tabla `kb.vehicle_identity` (migración
+      `0016_vehicle_identity`) que `kb build` llena en cada recálculo, una fila por variante
+      comercial no rechazada (con anuncios, o verificada; las "sin versión" entran marcadas) con
+      los valores de los tres niveles, la fuente de cada uno, sus notas de evolución y cuántos
+      anuncios la respaldan. Solo valores de la base, nunca de un anuncio. En el portal, Fichas
+      pasa a ser la lista de vehículos (`/fichas/[id]`); la ficha por anuncio queda en
+      `/fichas/anuncio/...`, enlazada desde la ficha del vehículo y los casos de revisión.
+  - [x] `0016_vehicle_identity` aplicada en omnibase (2026-11-25). El rol del portal ya puede
+        leerla (los permisos por defecto de `portal_role.sql` la cubren). Se llena con el
+        siguiente Recalcular.
 - [ ] **Prueba de punta a punta intermitente** (Recalcular en `/`): unas 3 de 12 corridas la
       respuesta de la server action no termina en el navegador ("Enviando…" se queda) aunque el
       worker aplica el recálculo. Existía antes de la ficha final; no es un bloqueo de la base

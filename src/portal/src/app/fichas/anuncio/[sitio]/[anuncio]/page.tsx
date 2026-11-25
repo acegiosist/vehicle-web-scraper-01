@@ -10,14 +10,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { userWithRole } from "@/lib/auth/current-user";
 import { fieldLabel, formatValue } from "@/lib/fields";
-import { FINAL_SHEET_GROUPS, finalListHref, parseFinalFilters, reasonLabel } from "@/lib/final-listing";
+import { FINAL_SHEET_GROUPS, reasonLabel } from "@/lib/final-listing";
 import { formatDate, formatInt, formatMoney } from "@/lib/format";
 import { getCatalogs } from "@/lib/queries/knowledge";
 import { finalRecord } from "@/lib/queries/final";
+import { identityHref } from "@/lib/vehicle-identity";
 
-export const metadata: Metadata = { title: "Ficha" };
+export const metadata: Metadata = { title: "Ficha del anuncio" };
 
-export default function FinalRecordPage(props: PageProps<"/fichas/[sitio]/[anuncio]">) {
+export default function FinalRecordPage(props: PageProps<"/fichas/anuncio/[sitio]/[anuncio]">) {
   return (
     <main className="space-y-6">
       <Suspense fallback={<Skeleton className="h-96" />}>
@@ -27,9 +28,9 @@ export default function FinalRecordPage(props: PageProps<"/fichas/[sitio]/[anunc
   );
 }
 
-async function FinalRecordView({ params, searchParams }: PageProps<"/fichas/[sitio]/[anuncio]">) {
+async function FinalRecordView({ params }: PageProps<"/fichas/anuncio/[sitio]/[anuncio]">) {
   if (!(await userWithRole("lector"))) return <NoAccess needed="lector" />;
-  const [{ sitio, anuncio }, sp] = await Promise.all([params, searchParams]);
+  const { sitio, anuncio } = await params;
   const [r, catalogs] = await Promise.all([finalRecord(sitio, anuncio), getCatalogs()]);
   if (!r) notFound();
   const values = r as unknown as Record<string, unknown>;
@@ -40,8 +41,9 @@ async function FinalRecordView({ params, searchParams }: PageProps<"/fichas/[sit
   );
   return (
     <div className="space-y-6">
-      <Link href={finalListHref(parseFinalFilters(sp))} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-        <ArrowLeft className="size-4" aria-hidden /> Volver a la lista
+      {/* a listing in a variant belongs to that vehicle's sheet; an unassigned one has none */}
+      <Link href={r.variant_id ? identityHref(r.variant_id) : "/fichas"} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+        <ArrowLeft className="size-4" aria-hidden /> {r.variant_id ? "Ficha del vehículo" : "Fichas"}
       </Link>
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight" data-testid="final-name">
@@ -71,6 +73,7 @@ async function FinalRecordView({ params, searchParams }: PageProps<"/fichas/[sit
               ["Generación", r.generation_id ? link(`/base/generacion/${r.generation_id}`, r.generation_name ?? "Ver") : "—"],
               ["Tren motriz", r.powertrain_id ? link(`/base/tren-motriz/${r.powertrain_id}`, "Ver tren motriz") : "—"],
               ["Variante", r.variant_id ? link(`/base/variante/${r.variant_id}`, "Ver variante") : "—"],
+              ["Vehículo", r.variant_id ? link(identityHref(r.variant_id), "Ver ficha del vehículo") : "—"],
               ["Publicado", formatDate(r.listed_at)],
               ["Ficha calculada", formatDate(r.built_at)],
             ]}

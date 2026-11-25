@@ -95,16 +95,16 @@ WHERE l.excluded_reason IS NULL"""
 INTEGER_TYPES = {"smallint", "integer", "bigint"}
 
 
-def column_types(cur) -> dict[str, str]:
-    """The table's columns in order (but built_at, which defaults), with their SQL types."""
+def column_types(cur, table: str = TABLE) -> dict[str, str]:
+    """A table's columns in order (but built_at, which defaults), with their SQL types."""
     cur.execute("""
 SELECT a.attname, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a
 WHERE a.attrelid = %s::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'built_at'
-ORDER BY a.attnum""", (TABLE,))
+ORDER BY a.attnum""", (table,))
     return dict(cur.fetchall())
 
 
-def _cast(expr: str, sql_type: str) -> str:
+def cast(expr: str, sql_type: str) -> str:
     # specs hold JSON numbers as text ("17" or "17.0"): integers go through numeric, rounded
     if sql_type in INTEGER_TYPES:
         return f"round(({expr})::numeric)::{sql_type}"
@@ -117,7 +117,7 @@ def insert_sql(types: dict[str, str]) -> str:
                            "(a schema field needs a migration and a source here)")
     exprs = []
     for column, sql_type in types.items():
-        casts = [_cast(src, sql_type) for src in SOURCES[column]]
+        casts = [cast(src, sql_type) for src in SOURCES[column]]
         exprs.append(casts[0] if len(casts) == 1 else f"coalesce({', '.join(casts)})")
     return f"INSERT INTO {TABLE} ({', '.join(types)})\nSELECT {', '.join(exprs)}{_FROM}"
 

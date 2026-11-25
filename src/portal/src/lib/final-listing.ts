@@ -1,9 +1,9 @@
 /**
- * kb.final_listing on the portal (/fichas): filters, links, field groups and the unassigned
- * reasons. tests/test_portal_sync.py checks FINAL_SHEET_GROUPS against kb/final.py SOURCES
- * and UNASSIGNED_REASONS against the listing_level check constraint.
+ * kb.final_listing on the portal (/fichas/anuncio/...): links, field groups (shared with the
+ * vehicle's identity sheet) and the unassigned reasons. tests/test_portal_sync.py checks
+ * FINAL_SHEET_GROUPS against kb/final.py SOURCES (and kb/vehicle.py VALUES) and
+ * UNASSIGNED_REASONS against the listing_level check constraint.
  */
-import { DEFAULT_PAGE_SIZE, parsePaging } from "@/lib/paging";
 
 /** kb.listing_level.unassigned_reason, in Spanish. */
 export const UNASSIGNED_REASONS: Record<string, string> = {
@@ -38,56 +38,7 @@ export const FINAL_SHEET_GROUPS: [string, string[]][] = [
   ["Seguridad del vehículo y utilidad", ["alarm", "immobilizer", "tow_package", "bed_liner"]],
 ];
 
-/** "Estado" filter: every record, the assigned ones, the unassigned ones, or one reason. */
-export type FinalStatus = "asignados" | "sin-asignar" | keyof typeof UNASSIGNED_REASONS;
-
-export interface FinalFilters {
-  country?: string;
-  status?: FinalStatus;
-  year?: number;
-  q?: string;
-  page: number;
-  size: number;
-}
-
-type SearchParams = Record<string, string | string[] | undefined>;
-
-const YEAR_MIN = 1990;
-const YEAR_MAX = 2100;
-
-/** `?pais=&estado=&anio=&q=&pagina=&por=`; anything invalid is ignored. */
-export function parseFinalFilters(sp: SearchParams): FinalFilters {
-  const one = (k: string) => (Array.isArray(sp[k]) ? sp[k][0] : sp[k]);
-  const country = (one("pais") ?? "").trim().toUpperCase();
-  const status = one("estado") ?? "";
-  const year = Number.parseInt(one("anio") ?? "", 10);
-  const q = (one("q") ?? "").trim().slice(0, 80);
-  return {
-    country: /^[A-Z]{2}$/.test(country) ? country : undefined,
-    status: status === "asignados" || status === "sin-asignar" || Object.hasOwn(UNASSIGNED_REASONS, status)
-      ? (status as FinalStatus) : undefined,
-    year: year >= YEAR_MIN && year <= YEAR_MAX ? year : undefined,
-    q: q || undefined,
-    ...parsePaging(sp),
-  };
-}
-
-export function finalListHref(f: FinalFilters, page = f.page): string {
-  const p = new URLSearchParams();
-  if (f.country) p.set("pais", f.country);
-  if (f.status) p.set("estado", f.status);
-  if (f.year) p.set("anio", String(f.year));
-  if (f.q) p.set("q", f.q);
-  if (f.size !== DEFAULT_PAGE_SIZE) p.set("por", String(f.size));
-  if (page > 1) p.set("pagina", String(page));
-  const s = p.toString();
-  return s ? `/fichas?${s}` : "/fichas";
-}
-
-/** One listing's record; `back` keeps the list's filters for "Volver a la lista". */
-export function finalRecordHref(site: string, listingId: string, back?: FinalFilters): string {
-  const path = `/fichas/${encodeURIComponent(site)}/${encodeURIComponent(listingId)}`;
-  if (!back) return path;
-  const list = finalListHref(back);
-  return `${path}${list.slice("/fichas".length)}`;
+/** One listing's final record (the vehicle's sheet is /fichas/[id], lib/vehicle-identity.ts). */
+export function finalRecordHref(site: string, listingId: string): string {
+  return `/fichas/anuncio/${encodeURIComponent(site)}/${encodeURIComponent(listingId)}`;
 }

@@ -839,3 +839,61 @@ def test_final_listing_inherits_the_levels(conn, tmp_path):
     clean(conn)
     assert q(conn, "SELECT count(*) FROM kb.final_listing") == [(0,)]
     assert build(conn)["final_listings"]["rows"] == 11
+
+
+def identity(conn, variant_id):
+    rows = q(conn, "SELECT make, model, trim, trim_unknown, country_code, listings, horsepower_hp, sunroof, "
+                   "length_mm, torque_nm, engine_displacement_l, sources, evolution_notes, variant_status "
+                   "FROM kb.vehicle_identity WHERE variant_id = %s", variant_id)
+    return rows[0] if rows else None
+
+
+def test_vehicle_identity_consolidates_the_levels(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017 + i % 2, 1.6, drivetrain="FWD", horsepower_hp=121, sunroof=True) for i in range(4)]
+    recs += [creta(f"b{i}", 2017, 2.0, drivetrain="FWD", trim="Limited", leather_seats=i == 0 or None)
+             for i in range(3)]
+    recs += [creta(f"u{i}", 2017, 1.6, drivetrain="FWD", trim=None) for i in range(2)]   # trim unknown
+    built(conn, tmp_path, recs)
+    gid = q(conn, "SELECT id FROM kb.generation")[0][0]
+    a, pid = q(conn, "SELECT v.id, v.powertrain_id FROM kb.commercial_variant v JOIN kb.powertrain p "
+                     "ON p.id = v.powertrain_id WHERE p.engine_displacement_l = 1.6 AND NOT v.trim_unknown")[0]
+    unknown = q(conn, "SELECT id FROM kb.commercial_variant WHERE trim_unknown")[0][0]
+    limited = q(conn, "SELECT id FROM kb.commercial_variant WHERE trim_name = 'Limited'")[0][0]
+    for etype, eid, field, kind, value in [("generation", gid, "length_mm", "manual", "4300"),
+                                           ("powertrain", pid, "torque_nm", "external", "151")]:
+        conn.execute("INSERT INTO kb.spec_evidence (entity_type, entity_id, field, source_kind, value, status) "
+                     "VALUES (%s, %s, %s, %s, %s, 'accepted')", (etype, eid, field, kind, value))
+    conn.execute("INSERT INTO kb.evolution_note (variant_id, field, value, year_from, source, note) "
+                 "VALUES (%s, 'headlight_type_code', '\"LED\"', 2018, 'manual', 'facelift')", (a,))
+    # a provisional variant without listings (they moved elsewhere) gets no sheet
+    empty = q(conn, "INSERT INTO kb.commercial_variant (generation_id, powertrain_id, country_code, trim_name, "
+                    "trim_key) VALUES (%s, %s, 'CO', 'Vieja', 'vieja') RETURNING id", gid, pid)[0][0]
+    s = build(conn)
+    assert s["vehicle_identities"]["rows"] == 3
+    row = identity(conn, a)
+    make, model, trim, trim_unknown, country, listings, hp, sunroof, length, torque, disp, sources, notes, st = row
+    assert (make, model, trim, trim_unknown, country, listings, st) == ("Hyundai", "Creta", "Advance", False, "CO", 4,
+                                                                         "provisional")
+    # Only the base's values, with where each came from (manual > external > listings).
+    assert (hp, sunroof, length, torque, float(disp)) == (121, True, 4300, 151, 1.6)
+    assert {k: sources[k] for k in ("horsepower_hp", "sunroof", "length_mm", "torque_nm")} == {
+        "horsepower_hp": "listings", "sunroof": "listings", "length_mm": "manual", "torque_nm": "external"}
+    assert "engine_displacement_l" not in sources                       # the powertrain's key, not evidence
+    assert notes == [{"field": "headlight_type", "value": "LED", "year_from": 2018, "note": "facelift",
+                      "source": "manual"}]
+    # No listing fills a gap: one listing's leather seats aren't published, so only its final record has them.
+    assert q(conn, "SELECT leather_seats FROM kb.vehicle_identity WHERE variant_id = %s", limited) == [(None,)]
+    assert q(conn, "SELECT leather_seats FROM kb.final_listing WHERE listing_id = 'b0'") == [(True,)]
+    assert identity(conn, unknown)[2:4] == (None, True)
+    assert identity(conn, empty) is None
+    # verified without listings: kept; rejected (variant or its powertrain): left out
+    conn.execute("UPDATE kb.commercial_variant SET status = 'verified' WHERE id = %s", (empty,))
+    conn.execute("UPDATE kb.commercial_variant SET status = 'rejected' WHERE id = %s", (unknown,))
+    conn.execute("UPDATE kb.powertrain SET status = 'rejected' WHERE id = (SELECT powertrain_id FROM "
+                 "kb.commercial_variant WHERE id = %s)", (limited,))
+    assert build(conn)["vehicle_identities"]["rows"] == 2
+    assert identity(conn, empty)[5] == 0 and identity(conn, empty)[-1] == "verified"
+    assert identity(conn, unknown) is None and identity(conn, limited) is None
+    # kb clean doesn't touch it (it comes from the levels)
+    clean(conn)
+    assert q(conn, "SELECT count(*) FROM kb.vehicle_identity") == [(2,)]

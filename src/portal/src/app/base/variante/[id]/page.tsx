@@ -19,6 +19,7 @@ import { finalRecordHref } from "@/lib/final-listing";
 import { formatInt, formatMoney } from "@/lib/format";
 import { recentActionsFor } from "@/lib/queries/actions";
 import { getCatalogs, variant } from "@/lib/queries/knowledge";
+import { identityHref } from "@/lib/vehicle-identity";
 
 export const metadata: Metadata = { title: "Variante" };
 
@@ -55,7 +56,10 @@ async function VariantView({ params }: PageProps<"/base/variante/[id]">) {
         <p className="text-sm text-muted-foreground">
           {catalogs.country?.[v.country_code] ?? v.country_code} · vendida {v.sale_year_from}–{v.sale_year_to} ·{" "}
           {formatInt(v.listings)} anuncios
-          {v.trim_unknown && " · reúne los anuncios que no dicen su versión"}
+          {v.trim_unknown && " · reúne los anuncios que no dicen su versión"} ·{" "}
+          <Link href={identityHref(id)} className="underline">
+            Ficha del vehículo
+          </Link>
         </p>
       </div>
       <RecentActions actions={actions} />

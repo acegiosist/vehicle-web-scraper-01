@@ -28,6 +28,8 @@ Run after ``kb clean``. In one transaction under the writer lock:
    ``evolution_note`` (an equipment field flips from a year on).
 8. **Final records** (``kb/final.py``): ``kb.final_listing``, what each in-scope listing
    inherits from the three levels (the base wins; the listing fills gaps), evolution notes by year.
+9. **Identity sheets** (``kb/vehicle.py``): ``kb.vehicle_identity``, one row per live commercial
+   variant with the three levels' published values, where each came from and its notes.
 """
 from __future__ import annotations
 
@@ -45,6 +47,7 @@ from .levels import (BOOLEAN, EQUIP_MIN_AGREEMENT, EQUIP_MIN_SUPPORT, EQUIPMENT_
                      GENERATION_COLUMNS, GENERATION_FROM_LISTINGS, MECH_DISAGREEMENT, POWERTRAIN_COLUMNS,
                      LISTING_FIELD_OF, POWERTRAIN_FROM_LISTINGS, RANGES, SOURCE_RANK, VARIANT_COLUMNS,
                      VARIANT_FROM_LISTINGS)
+from .vehicle import write_identities
 
 BUILD_ISSUES = ("generation_split", "year_outside_generation", "spec_disagreement", "evolution_note")
 CYCLE_FIELDS = ("year_from", "year_to")
@@ -613,9 +616,12 @@ SELECT entity_type, entity_id, field, source_kind, value FROM kb.spec_evidence W
         write_cases(cur, cases, BUILD_ISSUES)
         # 8. final records: what each listing inherits, after everything above is published
         final = write_final(cur)
+        # 9. identity sheets: one per live variant, from the levels only
+        identities = write_identities(cur)
 
         summary = _summary(cur, listings, published)
         summary["final_listings"] = final
+        summary["vehicle_identities"] = identities
         cur.execute("INSERT INTO kb.build_run (summary) VALUES (%s) RETURNING id", (json.dumps(summary),))
         summary["run_id"] = cur.fetchone()[0]
     return summary

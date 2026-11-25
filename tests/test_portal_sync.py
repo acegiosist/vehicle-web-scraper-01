@@ -5,6 +5,7 @@
 * Field labels: every level column (kb/levels.py)      ->   src/portal/src/lib/fields.ts
 * Source precedence: levels.SOURCE_RANK               <->  fields.ts SOURCE_RANK
 * Final record: final.SOURCES columns                  <->  final-listing.ts FINAL_SHEET_GROUPS
+* Identity sheet: vehicle.VALUES                        <->  the same FINAL_SHEET_GROUPS
 * Unassigned reasons: listing_level's check (latest migration) <-> final-listing.ts UNASSIGNED_REASONS
 """
 from __future__ import annotations
@@ -14,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from vehicle_scraper.kb import final, levels, review, worker
+from vehicle_scraper.kb import final, levels, review, vehicle, worker
 
 PORTAL = Path(__file__).resolve().parents[1] / "src" / "portal" / "src" / "lib"
 ISSUES_TS = (PORTAL / "issues.ts").read_text(encoding="utf-8")

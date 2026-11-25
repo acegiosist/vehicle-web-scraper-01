@@ -535,6 +535,105 @@ export interface KbVehicleClass {
   sort_order: Generated<number>;
 }
 
+export interface KbVehicleIdentity {
+  abs: boolean | null;
+  adaptive_cruise_control: boolean | null;
+  airbags_count: number | null;
+  alarm: boolean | null;
+  alloy_wheels: boolean | null;
+  android_auto: boolean | null;
+  apple_carplay: boolean | null;
+  automatic_emergency_braking: boolean | null;
+  automatic_parking: boolean | null;
+  bed_liner: boolean | null;
+  blind_spot_monitoring: boolean | null;
+  bluetooth: boolean | null;
+  body_style: string | null;
+  brake_front: string | null;
+  brake_rear: string | null;
+  built_at: Generated<Timestamp>;
+  camera_360: boolean | null;
+  cargo_capacity_l: number | null;
+  climate_control: boolean | null;
+  cooled_seats: boolean | null;
+  country_code: string;
+  country_of_manufacture: string | null;
+  doors: number | null;
+  drivetrain: string | null;
+  dual_zone_ac: boolean | null;
+  engine_code: string | null;
+  engine_cylinders: number | null;
+  engine_displacement_l: Numeric | null;
+  engine_name: string | null;
+  ev_charging_speed_kw: Numeric | null;
+  ev_range_km: number | null;
+  evolution_notes: Json;
+  fog_lights: boolean | null;
+  front_camera: boolean | null;
+  fuel_economy_kml: Numeric | null;
+  fuel_tank_capacity_l: Numeric | null;
+  fuel_type: string | null;
+  gears: number | null;
+  generation_code: string | null;
+  generation_id: Int8;
+  generation_name: string;
+  generation_status: string;
+  headlight_type: string | null;
+  heated_seats: boolean | null;
+  height_mm: number | null;
+  horsepower_hp: number | null;
+  immobilizer: boolean | null;
+  keyless_entry: boolean | null;
+  lane_assist: boolean | null;
+  leather_seats: boolean | null;
+  led_lights: boolean | null;
+  length_mm: number | null;
+  listings: number;
+  make: string;
+  make_id: Int8;
+  memory_seats: boolean | null;
+  model: string;
+  model_id: Int8;
+  navigation: boolean | null;
+  observed_year_from: number | null;
+  observed_year_to: number | null;
+  panoramic_roof: boolean | null;
+  parking_sensors: boolean | null;
+  power_seats: boolean | null;
+  powertrain_id: Int8;
+  powertrain_status: string;
+  push_button_start: boolean | null;
+  reverse_camera: boolean | null;
+  roof_rails: boolean | null;
+  sale_year_from: number | null;
+  sale_year_to: number | null;
+  screen_size_in: Numeric | null;
+  seats: number | null;
+  segment_code: string | null;
+  /**
+   * Columna -> fuente del valor publicado (manual, external, listings, ai)
+   */
+  sources: Json;
+  stability_control: boolean | null;
+  sunroof: boolean | null;
+  tire_size: string | null;
+  torque_nm: number | null;
+  tow_package: boolean | null;
+  traction_control: boolean | null;
+  transmission_type: string | null;
+  trim: string | null;
+  trim_unknown: boolean;
+  variant_id: Int8;
+  variant_status: string;
+  vehicle_class_code: string | null;
+  wheel_size_in: number | null;
+  wheelbase_mm: number | null;
+  width_mm: number | null;
+  wireless_charger: boolean | null;
+  year_from: number | null;
+  year_to: number | null;
+}
+
 export interface KbWebAction {
   applied_at: Timestamp | null;
   error: string | null;
@@ -619,6 +718,7 @@ export interface DB {
   "kb.spec_evidence": KbSpecEvidence;
   "kb.transmission_type": KbTransmissionType;
   "kb.vehicle_class": KbVehicleClass;
+  "kb.vehicle_identity": KbVehicleIdentity;
   "kb.web_action": KbWebAction;
   "staging.current_listing": StagingCurrentListing;
   "staging.import_batch": StagingImportBatch;

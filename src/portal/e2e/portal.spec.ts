@@ -183,34 +183,33 @@ test.describe("editor", () => {
 test.describe("fichas (después del recálculo)", () => {
   test.use({ as: "lector" });
 
-  test("filtra la lista y abre la ficha final de un anuncio", async ({ page }) => {
+  test("lista los vehículos y abre la ficha de identidad de uno", async ({ page }) => {
     await page.goto("/fichas");
-    const total = page.getByTestId("final-total").filter({ visible: true });
-    await expect(total).toHaveText("17 fichas");
-
-    // The Zoe's model wasn't accepted: it has a record, unassigned, with its reason.
-    await page.getByLabel("Estado").selectOption("sin-asignar");
-    await page.getByRole("button", { name: "Filtrar" }).click();
-    await expect(total).toHaveText("1 ficha");
-    await expect(page.getByTestId("final-row").filter({ visible: true })).toContainText("Modelo no aceptado");
-
-    await page.goto("/fichas");
-    await page.getByLabel("Año").fill("2017");
+    const total = page.getByTestId("identity-total").filter({ visible: true });
+    // one sheet per live variant: two Cretas (1.6 and 1.5) and two Sportages; the Zoe's model
+    // wasn't accepted, so it has none
+    await expect(total).toHaveText("4 fichas");
     await page.getByPlaceholder("Buscar marca, modelo, versión…").fill("hyundai creta");
     await page.getByRole("button", { name: "Filtrar" }).click();
-    await expect(total).toHaveText("4 fichas");
-    await page.getByTestId("final-row").filter({ visible: true }).first().getByRole("link").click();
+    await expect(total).toHaveText("2 fichas");
+    await page.getByTestId("identity-row").filter({ visible: true, hasText: "121 hp" }).getByRole("link").click();
 
-    // The base wins: the editor's manual length (published on the generation) and the
-    // powertrain's power, both applied by the recalculation.
+    // Only the base's values, with where each came from: the editor's manual length (published
+    // on the generation by the recalculation) and the power the listings agree on.
+    await expect(page.getByTestId("identity-name").filter({ visible: true })).toHaveText("Hyundai Creta Advance");
+    await expect(page.locator('[data-field="length_mm"]').filter({ visible: true })).toHaveText(/4\.?300 mm/);
+    await expect(page.locator('[data-source="length_mm"]').filter({ visible: true })).toHaveText("Manual");
+    await expect(page.locator('[data-field="horsepower_hp"]').filter({ visible: true })).toHaveText("121 hp");
+    await expect(page.locator('[data-source="horsepower_hp"]').filter({ visible: true })).toHaveText("Anuncios");
+
+    // its listings open their final record, which leads back to the vehicle
+    await expect(page.getByTestId("identity-listing").filter({ visible: true })).toHaveCount(4);
+    await page.getByTestId("identity-listing").filter({ visible: true }).first().getByRole("link", { name: "2017" }).click();
     await expect(page.getByTestId("final-name").filter({ visible: true })).toHaveText("Hyundai Creta Advance 2017");
     await expect(page.getByTestId("final-status").filter({ visible: true })).toHaveText("Asignado");
-    await expect(page.locator('[data-field="length_mm"]').filter({ visible: true })).toHaveText(/4\.?300 mm/);
-    await expect(page.locator('[data-field="horsepower_hp"]').filter({ visible: true })).toHaveText("121 hp");
-    await page.getByRole("link", { name: "Ver variante" }).click();
-    await expect(page.getByTestId("variant-name").filter({ visible: true })).toContainText("Hyundai Creta Advance");
-    await page.goBack();
-    await page.getByRole("link", { name: "Volver a la lista" }).click();
+    await page.getByRole("link", { name: "Ficha del vehículo", exact: true }).click();
+    await expect(page.getByTestId("identity-name").filter({ visible: true })).toHaveText("Hyundai Creta Advance");
+    await page.getByRole("main").getByRole("link", { name: "Fichas", exact: true }).filter({ visible: true }).click();
     await expect(total).toHaveText("4 fichas");
   });
 
