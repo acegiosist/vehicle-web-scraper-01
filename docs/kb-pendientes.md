@@ -1,6 +1,7 @@
 # Base de conocimiento: pendientes
 
-Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración `0010_powertrain_rejected`).
+Estado al 2026-11-25 (rama `feat/knowledge-base-v2`, base `omnibase` en la migración
+`0012_variant_rejected`).
 
 ## Fase 3 (tres niveles): pendiente
 
@@ -35,8 +36,11 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
 - [x] **Rechazar un tren motriz rompía el recálculo** (2026-11-24): corregido en `kb build`; sus
       anuncios quedan sin asignar (`powertrain_rejected`). Migración `0010_powertrain_rejected`
       aplicada en omnibase (solo cambia una restricción: no hace falta `portal_role.sql`).
-- [ ] **Estado de la variante comercial**: se puede guardar pero `kb build` no lo usa todavía
-      (una variante rechazada sigue recibiendo anuncios). Falta decidir qué debe pasar.
+- [x] **Estado de la variante comercial** (2026-11-25): una variante rechazada ya no recibe
+      anuncios; quedan sin asignar (`variant_rejected`) con su generación y tren motriz, y la
+      ficha final hereda esos valores. Quitar el rechazo los devuelve en el siguiente recálculo.
+  - [x] Migración `0012_variant_rejected` aplicada en omnibase (2026-11-25; solo cambia una
+        restricción, no hace falta `portal_role.sql`).
 
 ## Fases siguientes
 
@@ -46,8 +50,8 @@ Estado al 2026-11-24 (rama `feat/knowledge-base-v2`, base `omnibase` en la migra
       `kb build` llena en cada recálculo, una fila por anuncio en alcance: gana la base, el
       anuncio solo llena huecos, los sin asignar llevan lo que heredan y su motivo. Probada con
       una copia de omnibase en el contenedor desechable (98.198 fichas, ~5 s).
-  - [ ] Aplicar `0011_final_listing` en omnibase (con visto bueno) y volver a correr
-        `docs/sql/portal_role.sql` (tabla nueva para el portal).
+  - [x] `0011_final_listing` aplicada en omnibase y `docs/sql/portal_role.sql` vuelto a correr
+        (2026-11-24). Se llena con el siguiente Recalcular.
   - [ ] Mostrarla en el portal o exportarla a archivo, si hace falta.
 - [ ] **Prueba de punta a punta intermitente** (Recalcular en `/`): unas 3 de 12 corridas la
       respuesta de la server action no termina en el navegador ("Enviando…" se queda) aunque el

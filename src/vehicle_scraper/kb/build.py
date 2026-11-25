@@ -13,6 +13,8 @@ Run after ``kb clean``. In one transaction under the writer lock:
    (``ambiguous_powertrain``) when several are. Ids are stable (``match_key``). A rejected
    powertrain is never recreated: listings whose only match it is stay ``powertrain_rejected``.
 4. **Commercial variants**: generation + powertrain + country + trim (``''`` = trim unknown).
+   A rejected variant is never recreated nor given listings: they keep their generation and
+   powertrain and stay ``variant_rejected``.
 5. **Evidence from listings**, recomputed every run: mechanical numbers from one plausible
    listing (most repeated value; > 10 % spread opens ``spec_disagreement``); equipment with
    >= 2 listings and >= 70 % agreement. Other sources' evidence is never touched.
@@ -349,8 +351,14 @@ VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""", (g.id, mk, fuel, trans, dri
                     l.reason = "powertrain_rejected" if l.key in rejected_keys else "ambiguous_powertrain"
 
         # 4. commercial variants ---------------------------------------------------------------
-        variants = {(g, p, c, t): vid for vid, g, p, c, t in _load(cur, """
-SELECT id, generation_id, powertrain_id, country_code, trim_key FROM kb.commercial_variant""")}
+        # A rejected variant is never recreated (it stays in `variants`) nor given listings:
+        # they keep their generation and powertrain and stay unassigned (variant_rejected).
+        variants, rejected_variants = {}, set()
+        for vid, g, p, c, t, vstatus in _load(cur, """
+SELECT id, generation_id, powertrain_id, country_code, trim_key, status FROM kb.commercial_variant"""):
+            variants[(g, p, c, t)] = vid
+            if vstatus == "rejected":
+                rejected_variants.add(vid)
         trim_names: dict[tuple, Counter] = defaultdict(Counter)
         for l in listings:
             if l.powertrain:
@@ -364,7 +372,11 @@ VALUES (%s, %s, %s, %s, %s) RETURNING id""", (*vkey[:3], name, vkey[3]))
                 variants[vkey] = cur.fetchone()[0]
         for l in listings:
             if l.powertrain:
-                l.variant = variants[(l.generation, l.powertrain, l.country, compact_key(l.trim))]
+                vid = variants[(l.generation, l.powertrain, l.country, compact_key(l.trim))]
+                if vid in rejected_variants:
+                    l.reason = "variant_rejected"
+                else:
+                    l.variant = vid
 
         # counts and observed years
         def years(ls):

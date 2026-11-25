@@ -158,7 +158,7 @@ debugging.
 
 Open items are tracked in `docs/kb-pendientes.md` (keep it current). Being built in phases toward three levels: generation (per body style, global years) →
 powertrain → commercial variant per country and trim, with structured evolution notes.
-So far (migrations `0001_catalogs_staging` … `0010_powertrain_rejected`):
+So far (migrations `0001_catalogs_staging` … `0012_variant_rejected`):
 - **The database is created by its owner.** Code only creates objects, through Alembic
   (`kb/migrations/`, `alembic.ini` at the root); `downgrade base` drops the `kb` and `staging`
   schemas. `alembic_version` stays in `public`.
@@ -212,10 +212,11 @@ So far (migrations `0001_catalogs_staging` … `0010_powertrain_rejected`):
   - Status (`provisional` / `verified` / `rejected`, on all three levels) changes only by a
     person (editor's Estado field; merging rejects the source generation). `verified` only stops
     new `generation_split` proposals; a rejected generation's listings become unassigned
-    (`no_generation_for_year`), they don't move to a sibling (use Unir for that); variant
-    status isn't read by `kb build` yet.
+    (`no_generation_for_year`), they don't move to a sibling (use Unir for that).
   - `kb.commercial_variant` = generation + powertrain + country + `trim_key` (`''` = trim
-    unknown, kept apart). `kb.listing_level` says where each listing landed or why not.
+    unknown, kept apart). A `rejected` variant is never recreated nor given listings: they keep
+    their generation and powertrain (the final record inherits those) and stay
+    `variant_rejected` (migration 0012); un-rejecting brings them back. `kb.listing_level` says where each listing landed or why not.
   - `kb.spec_evidence` holds candidates per entity/field/source; listing evidence is recomputed
     each run (mechanical: 1 plausible listing, most repeated, >10 % spread opens
     `spec_disagreement`; equipment: >= 2 listings and >= 70 %), other sources are never

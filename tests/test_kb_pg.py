@@ -276,6 +276,29 @@ def test_build_never_recreates_a_rejected_powertrain(conn, tmp_path):
     assert build(conn)["unassigned"] == {}
 
 
+def test_build_gives_no_listings_to_a_rejected_variant(conn, tmp_path):
+    recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD", horsepower_hp=121) for i in range(3)]
+    recs += [creta(f"s{i}", 2017, 1.6, drivetrain="FWD", trim="Limited") for i in range(2)]
+    built(conn, tmp_path, recs)
+    vid = q(conn, "SELECT id FROM kb.commercial_variant WHERE trim_key = 'advance'")[0][0]
+    pid = q(conn, "SELECT id FROM kb.powertrain")[0][0]
+    conn.execute("UPDATE kb.commercial_variant SET status = 'rejected' WHERE id = %s", (vid,))
+    s = build(conn)
+    assert s["assigned"] == 2 and s["unassigned"] == {"variant_rejected": 3}
+    # they keep their generation and powertrain; the variant isn't recreated and has no listings
+    assert q(conn, "SELECT generation_id IS NOT NULL, powertrain_id, variant_id, unassigned_reason "
+                   "FROM kb.listing_level WHERE listing_id = 'a0'") == [(True, pid, None, "variant_rejected")]
+    assert q(conn, "SELECT count(*), max(listings) FROM kb.commercial_variant WHERE trim_key = 'advance'") == [(1, 0)]
+    assert q(conn, "SELECT listings FROM kb.powertrain") == [(5,)]
+    # the final record inherits the powertrain and keeps the reason
+    assert q(conn, "SELECT powertrain_id, variant_id, horsepower_hp, unassigned_reason FROM kb.final_listing "
+                   "WHERE listing_id = 'a0'") == [(pid, None, 121, "variant_rejected")]
+    # Taking the rejection back brings the listings back on the next build.
+    conn.execute("UPDATE kb.commercial_variant SET status = 'provisional' WHERE id = %s", (vid,))
+    assert build(conn)["unassigned"] == {}
+    assert q(conn, "SELECT variant_id FROM kb.listing_level WHERE listing_id = 'a0'") == [(vid,)]
+
+
 def test_build_is_stable_and_applies_decisions(conn, tmp_path):
     recs = [creta(f"a{i}", 2017, 1.6, drivetrain="FWD") for i in range(4)]
     recs += [creta(f"b{i}", 2021, 1.5, drivetrain="FWD") for i in range(4)]
